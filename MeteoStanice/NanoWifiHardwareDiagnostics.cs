@@ -145,16 +145,26 @@ namespace MeteoStanice
                     }
 
                     Debug.WriteLine("Real Wi-Fi connect attempt " + attempt + " status: " + result.ConnectionStatus.ToString());
-                    if (WaitForValidWirelessIp(IpWaitMilliseconds))
+                    if (result.ConnectionStatus != WifiConnectionStatus.Success)
                     {
-                        LastConnectionMessage = "PRIPOJENO";
+                        LastConnectionMessage = ToDisplayConnectionMessage(result.ConnectionStatus);
                         ReportProgress(progressHandler, LastConnectionMessage);
-                        return true;
+                        Thread.Sleep(RetryDelayMilliseconds);
+                        continue;
                     }
 
-                    LastConnectionMessage = ToDisplayConnectionMessage(result.ConnectionStatus);
+                    bool ipReady = !configuration.UseDhcp || WaitForValidWirelessIp(IpWaitMilliseconds);
+                    if (!ipReady)
+                    {
+                        LastConnectionMessage = "DHCP TIMEOUT";
+                        ReportProgress(progressHandler, LastConnectionMessage);
+                        Thread.Sleep(RetryDelayMilliseconds);
+                        continue;
+                    }
+
+                    LastConnectionMessage = "PRIPOJENO";
                     ReportProgress(progressHandler, LastConnectionMessage);
-                    Thread.Sleep(RetryDelayMilliseconds);
+                    return true;
                 }
 
                 if (LastConnectionMessage == string.Empty || LastConnectionMessage == "OKAMZIK")

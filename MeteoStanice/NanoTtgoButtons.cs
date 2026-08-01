@@ -1,6 +1,7 @@
 using System;
 using System.Device.Gpio;
 using System.Diagnostics;
+using System.Threading;
 
 namespace MeteoStanice
 {
@@ -13,6 +14,7 @@ namespace MeteoStanice
         private bool _initialized;
         private bool _requestConsumed;
         private bool _ignoreUntilReleased;
+        private long _blockedUntilTicks;
 
         /// <summary>
         /// Initializes the setup button input.
@@ -49,6 +51,11 @@ namespace MeteoStanice
         public bool ConsumeSetupRequest()
         {
             if (!_initialized)
+            {
+                return false;
+            }
+
+            if (IsBlocked())
             {
                 return false;
             }
@@ -93,8 +100,63 @@ namespace MeteoStanice
             else
             {
                 _ignoreUntilReleased = false;
-                _requestConsumed = false;
+                _requestConsumed = IsBlocked();
             }
+        }
+
+        /// <summary>
+        /// Temporarily ignores setup button clicks during mode transitions.
+        /// </summary>
+        public void BlockSetupRequestsFor(int milliseconds)
+        {
+            if (milliseconds <= 0)
+            {
+                _blockedUntilTicks = 0;
+                return;
+            }
+
+            _blockedUntilTicks = DateTime.UtcNow.Ticks + (milliseconds * TimeSpan.TicksPerMillisecond);
+            _requestConsumed = true;
+            Debug.WriteLine("TTGO setup tlacitko blokovano na ms: " + milliseconds);
+        }
+
+        /// <summary>
+        /// Waits until the currently held setup button is released, or timeout expires.
+        /// </summary>
+        public void WaitUntilReleased(int timeoutMilliseconds)
+        {
+            int elapsed = 0;
+            while (_initialized && IsPressed() && elapsed < timeoutMilliseconds)
+            {
+                Thread.Sleep(25);
+                elapsed += 25;
+            }
+
+            if (_initialized && IsPressed())
+            {
+                _ignoreUntilReleased = true;
+                _requestConsumed = true;
+                return;
+            }
+
+            _ignoreUntilReleased = false;
+            _requestConsumed = IsBlocked();
+        }
+
+        private bool IsBlocked()
+        {
+            if (_blockedUntilTicks == 0)
+            {
+                return false;
+            }
+
+            if (DateTime.UtcNow.Ticks < _blockedUntilTicks)
+            {
+                return true;
+            }
+
+            _blockedUntilTicks = 0;
+            return false;
         }
 
         private bool IsPressed()

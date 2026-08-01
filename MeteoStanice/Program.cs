@@ -12,6 +12,7 @@ namespace MeteoStanice
         private const int RuntimeLoopDelayMilliseconds = 1000;
         private const int MeasurementUploadsPerCycle = 2;
         private const int EventUploadsPerCycle = 4;
+        private const int SetupButtonTransitionBlockMilliseconds = 1500;
 
         /// <summary>
         /// Runs a minimal debug loop used to validate nanoFramework deployment.
@@ -123,7 +124,10 @@ namespace MeteoStanice
                     display.ShowSetup(configuration.ProvisioningAccessPointName, configuration.ProvisioningHostName);
                     wifiHardwareDiagnostics.DisconnectClient();
                     buttons.IgnoreCurrentPressUntilReleased();
+                    buttons.BlockSetupRequestsFor(SetupButtonTransitionBlockMilliseconds);
+                    buttons.WaitUntilReleased(SetupButtonTransitionBlockMilliseconds);
                     NanoProvisioningResult provisioningResult = provisioningService.RunUntilSavedOrCancelled(configuration, buttons);
+                    buttons.BlockSetupRequestsFor(SetupButtonTransitionBlockMilliseconds);
                     configuration = provisioningResult.Configuration;
                     if (provisioningResult.ConfigurationSaved)
                     {
