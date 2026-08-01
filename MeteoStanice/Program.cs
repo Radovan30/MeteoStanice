@@ -132,6 +132,13 @@ namespace MeteoStanice
                         Debug.WriteLine("Konfigurace po setupu znovu nactena z flash, SSID=" + (configuration.WifiSsid == string.Empty ? "<nenastaveno>" : configuration.WifiSsid));
                         realWifiConnected = ConnectConfiguredWifi(display, wifiHardwareDiagnostics, configuration, counter);
                     }
+                    else
+                    {
+                        Debug.WriteLine("Setup skoncil bez nove ulozene konfigurace, znovu pripojuji stavajici Wi-Fi.");
+                        configuration = configurationService.LoadOrCreateDefault();
+                        identity = identityService.CreateIdentity(configuration);
+                        realWifiConnected = ConnectConfiguredWifi(display, wifiHardwareDiagnostics, configuration, counter);
+                    }
 
                     if (provisioningResult.RebootRequired)
                     {
@@ -148,10 +155,7 @@ namespace MeteoStanice
 
                     if (provisioningResult.CancelledByButton)
                     {
-                        Debug.WriteLine("Setup ukoncen tlacitkem, stanice se restartuje do meteo rezimu.");
-                        display.ShowReboot();
-                        Thread.Sleep(500);
-                        Power.RebootDevice(RebootOption.NormalReboot);
+                        Debug.WriteLine("Setup ukoncen tlacitkem, stanice pokracuje v meteo rezimu bez restartu.");
                     }
                 }
 
@@ -163,6 +167,7 @@ namespace MeteoStanice
         private static bool ConnectConfiguredWifi(NanoTtgoDisplay display, NanoWifiHardwareDiagnostics wifiHardwareDiagnostics, StationConfiguration configuration, int counter)
         {
             display.ShowWifiConnecting(configuration.WifiSsid);
+            display.ShowRuntime(counter, false, configuration.WifiSsid, "0.0.0.0", "WIFI START");
             Debug.WriteLine("Real Wi-Fi target SSID=" + (configuration.WifiSsid == string.Empty ? "<nenastaveno>" : configuration.WifiSsid));
             wifiHardwareDiagnostics.PrintAdapterCount();
             bool realWifiConnected = wifiHardwareDiagnostics.TryConnect(configuration, delegate (string message)

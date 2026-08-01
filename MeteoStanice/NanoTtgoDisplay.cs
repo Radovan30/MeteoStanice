@@ -57,7 +57,7 @@ namespace MeteoStanice
                 Debug.WriteLine("TTGO display DisplayControl.Initialize start.");
                 DisplayControl.Initialize(spiConfiguration, screenConfiguration, 1024);
                 Debug.WriteLine("TTGO display DisplayControl.Initialize hotovo.");
-                _surface = new nanoFramework.UI.Bitmap(BoardProfile.DisplayWidth, BoardProfile.DisplayHeight);
+                _surface = null;
                 DisplayControl.Clear();
                 _initialized = true;
                 ResetCachedState();
@@ -124,7 +124,7 @@ namespace MeteoStanice
         /// </summary>
         public void ShowWifiConnecting(string wifiSsid)
         {
-            DrawStatus(false, false, "METEO", WifiSsidLine(wifiSsid, false, string.Empty), "IP 0.0.0.0", "PRIPOJUJI");
+            DrawStatus(false, false, "METEO", WifiSsidLine(wifiSsid, false, string.Empty), "IP 0.0.0.0", "WIFI START");
         }
 
         /// <summary>
@@ -324,7 +324,13 @@ namespace MeteoStanice
                 return "--";
             }
 
-            if (wifiMessage.IndexOf("POKUS") >= 0 || wifiMessage.IndexOf("PRIPOJUJI") >= 0)
+            if (wifiMessage.IndexOf("WIFI START") >= 0
+                || wifiMessage.IndexOf("ADAPTER") >= 0
+                || wifiMessage.IndexOf("JMENO") >= 0
+                || wifiMessage.IndexOf("IP CONFIG") >= 0
+                || wifiMessage.IndexOf("DISCONNECT") >= 0
+                || wifiMessage.IndexOf("POKUS") >= 0
+                || wifiMessage.IndexOf("PRIPOJUJI") >= 0)
             {
                 return "--";
             }

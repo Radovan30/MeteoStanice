@@ -106,6 +106,8 @@ namespace MeteoStanice
             try
             {
                 Debug.WriteLine("Real Wi-Fi connect target SSID='" + configuration.WifiSsid + "', password length=" + (configuration.WifiPassword == null ? 0 : configuration.WifiPassword.Length));
+                LastConnectionMessage = "ADAPTER";
+                ReportProgress(progressHandler, LastConnectionMessage);
                 WifiAdapter[] adapters = WifiAdapter.FindAllAdapters();
                 if (adapters == null || adapters.Length == 0)
                 {
@@ -116,11 +118,17 @@ namespace MeteoStanice
                 }
 
                 WifiAdapter adapter = adapters[0];
+                LastConnectionMessage = "JMENO WIFI";
+                ReportProgress(progressHandler, LastConnectionMessage);
                 adapter.SetDeviceName(configuration.StationName);
+                LastConnectionMessage = "IP CONFIG";
+                ReportProgress(progressHandler, LastConnectionMessage);
                 ApplyMeteoIpConfiguration(configuration);
 
                 for (int attempt = 1; attempt <= ConnectAttempts; attempt++)
                 {
+                    LastConnectionMessage = "DISCONNECT";
+                    ReportProgress(progressHandler, LastConnectionMessage);
                     adapter.Disconnect();
                     Thread.Sleep(100);
                     LastConnectionMessage = "POKUS " + attempt;
