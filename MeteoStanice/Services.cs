@@ -413,25 +413,63 @@ namespace MeteoStanice
     {
         private readonly IStationConfigurationStore _configurationStore;
         private readonly StationConfigurationService _configurationService;
+        private readonly IProvisioningPortal _provisioningPortal;
 
         /// <summary>
         /// Creates a Wi-Fi provisioning service.
         /// </summary>
-        public WifiProvisioningService(IStationConfigurationStore configurationStore, StationConfigurationService configurationService)
+        public WifiProvisioningService(IStationConfigurationStore configurationStore, StationConfigurationService configurationService, IProvisioningPortal provisioningPortal)
         {
             _configurationStore = configurationStore;
             _configurationService = configurationService;
+            _provisioningPortal = provisioningPortal;
         }
 
         /// <summary>
-        /// Runs a bounded setup window; real AP/web handling is added behind this method.
+        /// Runs the setup window and returns either saved settings or the current configuration.
         /// </summary>
         public StationConfiguration RunStartupWindow(StationConfiguration currentConfiguration)
         {
-            // Real AP or web setup handling will plug into this bounded window.
+            if (currentConfiguration == null || _provisioningPortal == null)
+            {
+                return currentConfiguration;
+            }
+
             Debug.WriteLine("Provisioning okno otevreno na " + currentConfiguration.ProvisioningWindowMilliseconds + " ms.");
-            Thread.Sleep(currentConfiguration.ProvisioningWindowMilliseconds);
-            Debug.WriteLine("Provisioning okno ukonceno.");
+            Debug.WriteLine("Setup Wi-Fi SSID: " + currentConfiguration.ProvisioningAccessPointName);
+            Debug.WriteLine("Setup heslo/PIN: " + currentConfiguration.ProvisioningPassword);
+            Debug.WriteLine("Setup web: http://" + currentConfiguration.ProvisioningAddress + "/");
+
+            if (!_provisioningPortal.Start(currentConfiguration))
+            {
+                Debug.WriteLine("Provisioning portal se nepodarilo spustit, stanice pokracuje v meteo rezimu.");
+                return currentConfiguration;
+            }
+
+            ProvisioningWindowResult result = _provisioningPortal.WaitForResult(currentConfiguration.ProvisioningWindowMilliseconds);
+            _provisioningPortal.Stop();
+
+            if (result == null)
+            {
+                Debug.WriteLine("Provisioning portal nevratil vysledek, stanice pokracuje v meteo rezimu.");
+                return currentConfiguration;
+            }
+
+            if (result.ConfigurationSaved && ApplyNewConfiguration(result.Configuration))
+            {
+                Debug.WriteLine("Nova konfigurace ulozena, stanice prechazi do meteo rezimu s novym nastavenim.");
+                return result.Configuration;
+            }
+
+            if (result.TimedOut)
+            {
+                Debug.WriteLine("Provisioning okno vyprselo, AP se vypina a stanice pokracuje v meteo rezimu.");
+            }
+            else if (result.Message != null && result.Message.Length > 0)
+            {
+                Debug.WriteLine(result.Message);
+            }
+
             return currentConfiguration;
         }
 
@@ -499,8 +537,8 @@ namespace MeteoStanice
             // Defaults are intentionally conservative and test-friendly.
             StationConfiguration configuration = new StationConfiguration();
             configuration.StationId = "METEO-TEST-001";
-            configuration.DeviceHardwareId = "ESP32C3-UNKNOWN";
-            configuration.StationName = "Testovaci meteostanice";
+            configuration.DeviceHardwareId = BoardProfile.HardwareIdPrefix + "-UNKNOWN";
+            configuration.StationName = "XIAO ESP32C3 meteostanice";
             configuration.FirmwareVersion = "0.1.0-test";
             configuration.SamplePeriodMilliseconds = 1000;
             configuration.AggregationIntervalSeconds = 600;
@@ -515,7 +553,9 @@ namespace MeteoStanice
             configuration.GatewayAddress = "192.168.4.1";
             configuration.SubnetMask = "255.255.255.0";
             configuration.DnsAddress = "8.8.8.8";
-            configuration.ProvisioningAccessPointName = "MeteoStanice-Setup";
+            configuration.ProvisioningAccessPointName = BoardProfile.ProvisioningAccessPointName;
+            configuration.ProvisioningPassword = "12345678";
+            configuration.ProvisioningAddress = "192.168.4.1";
             configuration.ProvisioningWindowMilliseconds = 30000;
             configuration.ConfigurationVersion = 1;
             configuration.RemoteConfigurationEnabled = true;

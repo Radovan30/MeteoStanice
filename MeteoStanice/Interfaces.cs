@@ -115,4 +115,25 @@ namespace MeteoStanice
         /// </summary>
         PowerState Read();
     }
+
+    /// <summary>
+    /// Runs the temporary setup access point and web form.
+    /// </summary>
+    public interface IProvisioningPortal
+    {
+        /// <summary>
+        /// Starts the setup portal for the supplied configuration.
+        /// </summary>
+        bool Start(StationConfiguration configuration);
+
+        /// <summary>
+        /// Waits until the user saves settings or the setup window expires.
+        /// </summary>
+        ProvisioningWindowResult WaitForResult(int timeoutMilliseconds);
+
+        /// <summary>
+        /// Stops the setup portal and releases network resources.
+        /// </summary>
+        void Stop();
+    }
 }

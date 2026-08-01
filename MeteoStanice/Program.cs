@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Threading;
 
 namespace MeteoStanice
@@ -8,80 +9,83 @@ namespace MeteoStanice
     public class Program
     {
         /// <summary>
-        /// Creates hardware configuration, wires services and starts the station.
+        /// Runs a minimal debug loop used to validate nanoFramework deployment.
         /// </summary>
         public static void Main()
         {
-            // Configuration is loaded first so the station can recover after restart.
             IStationConfigurationStore configurationStore = new FlashStationConfigurationStore();
             StationConfigurationService configurationService = new StationConfigurationService(configurationStore);
             StationConfiguration configuration = configurationService.LoadOrCreateDefault();
-
-            // After boot the station opens a short setup window for local changes.
-            WifiProvisioningService provisioningService = new WifiProvisioningService(configurationStore, configurationService);
+            NanoProvisioningService provisioningService = new NanoProvisioningService(configurationStore, configurationService, new NanoFrameworkProvisioningPortal());
             configuration = provisioningService.RunStartupWindow(configuration);
-
-            // Time provider is injected so firmware logic can be tested deterministically.
-            ITimeProvider timeProvider = new FakeTimeProvider();
-
-            // Queues keep data locally while Wi-Fi or the server is unavailable.
-            IPersistentQueue<MeasurementRecord> measurementQueue = new InMemoryPersistentQueue<MeasurementRecord>(configuration.LocalQueueCapacity);
-            IPersistentQueue<DeviceEvent> eventQueue = new InMemoryPersistentQueue<DeviceEvent>(configuration.LocalQueueCapacity);
-
-            // API and Wi-Fi scanner are behind interfaces for test and real hardware variants.
-            IApiClient apiClient = new FakeApiClient();
-            IWifiScanner wifiScanner = new FakeWifiScanner();
-            RetryPolicy retryPolicy = new RetryPolicy(3, 250);
-
-            // Station identity lets the server distinguish and manage multiple stations.
             StationIdentityService identityService = new StationIdentityService();
-            StationIdentity stationIdentity = identityService.CreateIdentity(configuration);
+            StationIdentity identity = identityService.CreateIdentity(configuration);
 
-            // Remote configuration can change Wi-Fi, IP, intervals and other station settings.
-            RemoteConfigurationService remoteConfigurationService = new RemoteConfigurationService(apiClient, configurationStore, configurationService);
-            configuration = remoteConfigurationService.CheckAndApply(configuration, stationIdentity);
+            Debug.WriteLine("Board: " + BoardProfile.BoardName);
+            Debug.WriteLine("Station: " + identity.StationId + " / " + identity.DeviceHardwareId);
+            Debug.WriteLine("Setup SSID: " + configuration.ProvisioningAccessPointName);
+            new BootProvisioningWindow().PrintStartupWindow(configuration);
 
-            // Location is estimated from nearby Wi-Fi access points through the server.
-            LocationService locationService = new LocationService(wifiScanner, apiClient, configurationStore, timeProvider);
-            locationService.TryUpdateLocation(configuration, stationIdentity);
+            BootSensorSmokeService sensorSmokeService = new BootSensorSmokeService();
+            FakeNanoFriendlySensors sensors = new FakeNanoFriendlySensors();
+            NanoMeasurementBuilder measurementBuilder = new NanoMeasurementBuilder();
+            NanoMeasurementQueue measurementQueue = new NanoMeasurementQueue(8);
+            NanoDeviceEventQueue eventQueue = new NanoDeviceEventQueue(8);
+            NanoDeviceEventService eventService = new NanoDeviceEventService(eventQueue);
+            NanoUploadClient uploadClient = new NanoUploadClient();
+            NanoMeasurementUploadService uploadService = new NanoMeasurementUploadService(measurementQueue, uploadClient);
+            NanoDeviceEventUploadService eventUploadService = new NanoDeviceEventUploadService(eventQueue, uploadClient);
+            FakeNanoPowerMonitor powerMonitor = new FakeNanoPowerMonitor();
+            NanoPowerMonitoringService powerService = new NanoPowerMonitoringService(powerMonitor, eventService);
+            NanoWifiService wifiService = new NanoWifiService(eventService);
+            NanoWifiHardwareDiagnostics wifiHardwareDiagnostics = new NanoWifiHardwareDiagnostics();
+            int counter = 0;
 
-            // Sensors are injected as abstractions; fake implementations are used for now.
-            ISensor<Sht40Sample> sht40 = new FakeSht40Sensor(timeProvider);
-            ISensor<Bmp280Sample> bmp280 = new FakeBmp280Sensor(timeProvider);
-            ISensor<Sps30Sample> sps30 = new FakeSps30Sensor(timeProvider);
-            IPowerMonitor powerMonitor = new FakePowerMonitor(timeProvider);
+            eventService.Report(identity.StationId, DeviceEventSeverity.Information, DeviceEventCategory.System, DeviceEventCode.DeviceStarted, "Program", "Firmware started.");
+            NanoWifiStatus wifiStatus = wifiService.Connect(configuration, identity.StationId);
+            Debug.WriteLine("Wi-Fi state=" + wifiStatus.State.ToString() + ", IP=" + wifiStatus.IpAddress);
+            wifiHardwareDiagnostics.PrintAdapterCount();
+            wifiHardwareDiagnostics.ScanAndPrintNetworks();
+            bool realWifiConnected = wifiHardwareDiagnostics.TryConnect(configuration);
+            Debug.WriteLine("Real Wi-Fi connected=" + realWifiConnected);
 
-            // Application services are composed once at startup.
-            EventReportingService eventReportingService = new EventReportingService(
-                eventQueue,
-                timeProvider,
-                configuration);
+            // Keep the app alive and produce regular output for the debugger console.
+            while (true)
+            {
+                BootSensorReadResult result = sensorSmokeService.Read();
+                Debug.WriteLine("Hello world from XIAO ESP32C3 / nanoFramework: " + counter);
+                if (result.IsSuccess)
+                {
+                    BootSensorSample sample = result.Value;
+                    Debug.WriteLine("Smoke sample T=" + sample.TemperatureCelsius + " C, RH=" + sample.RelativeHumidityPercent + " %");
+                }
+                else
+                {
+                    Debug.WriteLine("Smoke sample failed: " + result.ErrorCode.ToString() + " " + result.ErrorMessage);
+                }
 
-            MeasurementAggregationService aggregationService = new MeasurementAggregationService(
-                configuration.ExpectedSamplesPerInterval);
+                Sht40ReadResult sht40 = sensors.ReadSht40();
+                Bmp280ReadResult bmp280 = sensors.ReadBmp280();
+                Sps30ReadResult sps30 = sensors.ReadSps30();
+                Debug.WriteLine("SHT40 T=" + sht40.Value.TemperatureCelsius + " C, RH=" + sht40.Value.RelativeHumidityPercent + " %");
+                Debug.WriteLine("BMP280 P=" + bmp280.Value.PressureHpa + " hPa");
+                Debug.WriteLine("SPS30 PM2.5=" + sps30.Value.MassPm25 + " ug/m3, PM10=" + sps30.Value.MassPm10 + " ug/m3");
 
-            MeasurementUploadService uploadService = new MeasurementUploadService(
-                measurementQueue,
-                eventQueue,
-                apiClient,
-                retryPolicy);
+                NanoMeasurementRecord record = measurementBuilder.Build(identity.StationId, sht40, bmp280, sps30);
+                measurementQueue.Enqueue(record);
+                Debug.WriteLine("Record #" + record.SequenceNumber + " values=" + record.ValidValueCount + ", failed=" + record.FailedReadCount + ", status=" + record.Status.ToString());
+                Debug.WriteLine("Queue count=" + measurementQueue.Count + "/" + measurementQueue.Capacity);
+                uploadService.TryUploadOne();
+                Debug.WriteLine("Queue after upload=" + measurementQueue.Count + "/" + measurementQueue.Capacity);
+                NanoPowerState powerState = powerService.ReadAndReport(identity.StationId);
+                Debug.WriteLine("Power mains=" + powerState.MainsAvailable + ", battery=" + powerState.BatteryActive + ", voltage=" + powerState.BatteryVoltage);
+                eventUploadService.TryUploadOne();
+                eventUploadService.TryUploadOne();
+                Debug.WriteLine("Event queue after upload=" + eventQueue.Count);
 
-            MeasurementCoordinator coordinator = new MeasurementCoordinator(
-                configuration,
-                timeProvider,
-                sht40,
-                bmp280,
-                sps30,
-                powerMonitor,
-                aggregationService,
-                measurementQueue,
-                eventReportingService,
-                uploadService);
-
-            // The coordinator owns the infinite measurement loop.
-            coordinator.Run();
-
-            Thread.Sleep(Timeout.Infinite);
+                counter++;
+                Thread.Sleep(1000);
+            }
         }
     }
 }

@@ -55,8 +55,6 @@ namespace MeteoStanice
         public double NumberPm10 { get; set; }
         // Typical particle size reported by SPS30.
         public double TypicalParticleSize { get; set; }
-        // Raw SPS30 diagnostic status for server-side interpretation.
-        public int RawDiagnosticStatus { get; set; }
         // Timestamp assigned when the sample was captured.
         public DateTime SampledAt { get; set; }
     }
@@ -221,6 +219,10 @@ namespace MeteoStanice
         public string DnsAddress { get; set; }
         // Name of the temporary setup access point.
         public string ProvisioningAccessPointName { get; set; }
+        // Password for the temporary setup access point and setup form.
+        public string ProvisioningPassword { get; set; }
+        // Local web address used by the setup portal.
+        public string ProvisioningAddress { get; set; }
         // Setup window length after boot.
         public int ProvisioningWindowMilliseconds { get; set; }
         // Configuration schema or server revision.
@@ -340,5 +342,22 @@ namespace MeteoStanice
         public string Message { get; set; }
         // Time when the error occurred.
         public DateTime OccurredAt { get; set; }
+    }
+
+    /// <summary>
+    /// Describes the outcome of the temporary startup setup portal.
+    /// </summary>
+    public sealed class ProvisioningWindowResult
+    {
+        // True when a user connected to the setup portal.
+        public bool ClientConnected { get; set; }
+        // True when a valid configuration was saved before timeout.
+        public bool ConfigurationSaved { get; set; }
+        // True when the setup window elapsed without saving.
+        public bool TimedOut { get; set; }
+        // Configuration saved through the setup portal.
+        public StationConfiguration Configuration { get; set; }
+        // Short diagnostic message written by the portal implementation.
+        public string Message { get; set; }
     }
 }

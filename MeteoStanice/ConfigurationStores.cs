@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.IO;
 
 namespace MeteoStanice
 {
@@ -33,7 +34,6 @@ namespace MeteoStanice
         /// </summary>
         public bool TryLoad(out StationConfiguration configuration)
         {
-            // RAM store is useful only for tests inside one firmware run.
             configuration = _configuration;
             return _hasConfiguration;
         }
@@ -43,7 +43,6 @@ namespace MeteoStanice
         /// </summary>
         public bool Save(StationConfiguration configuration)
         {
-            // Save a reference because this implementation is only for test scenarios.
             _configuration = configuration;
             _hasConfiguration = configuration != null;
             return _hasConfiguration;
@@ -51,29 +50,239 @@ namespace MeteoStanice
     }
 
     /// <summary>
-    /// Placeholder for a flash-backed configuration store.
+    /// Saves station configuration to ESP32 internal flash storage.
     /// </summary>
     public sealed class FlashStationConfigurationStore : IStationConfigurationStore
     {
+        // Internal ESP32 storage path handled by nanoFramework littlefs.
+        private const string ConfigurationPath = @"I:\meteo.cfg";
+
         /// <summary>
-        /// Attempts to load configuration from non-volatile memory.
+        /// Attempts to load configuration from internal flash storage.
         /// </summary>
         public bool TryLoad(out StationConfiguration configuration)
         {
-            // Real implementation will deserialize bytes from flash.
             configuration = null;
-            Debug.WriteLine("Flash konfigurace zatim neni napojena na konkretni nanoFramework storage balicek.");
-            return false;
+
+            try
+            {
+                if (!File.Exists(ConfigurationPath))
+                {
+                    Debug.WriteLine("Konfigurace ve flash zatim neexistuje.");
+                    return false;
+                }
+
+                string content = File.ReadAllText(ConfigurationPath);
+                configuration = Deserialize(content);
+                Debug.WriteLine("Konfigurace nactena z flash.");
+                return configuration != null;
+            }
+            catch
+            {
+                Debug.WriteLine("Konfiguraci z flash nelze nacist.");
+                configuration = null;
+                return false;
+            }
         }
 
         /// <summary>
-        /// Persists configuration to non-volatile memory.
+        /// Saves configuration to internal flash storage.
         /// </summary>
         public bool Save(StationConfiguration configuration)
         {
-            // Real implementation must write atomically to survive power loss.
-            Debug.WriteLine("Flash ulozeni konfigurace zatim neni napojene na konkretni nanoFramework storage balicek.");
-            return false;
+            if (configuration == null)
+            {
+                return false;
+            }
+
+            try
+            {
+                File.WriteAllText(ConfigurationPath, Serialize(configuration));
+                Debug.WriteLine("Konfigurace ulozena do flash: " + ConfigurationPath);
+                return true;
+            }
+            catch
+            {
+                Debug.WriteLine("Konfiguraci do flash nelze ulozit.");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Converts configuration into a small key-value text file.
+        /// </summary>
+        private static string Serialize(StationConfiguration configuration)
+        {
+            return "StationId=" + Escape(configuration.StationId) + "\n"
+                + "DeviceHardwareId=" + Escape(configuration.DeviceHardwareId) + "\n"
+                + "StationName=" + Escape(configuration.StationName) + "\n"
+                + "FirmwareVersion=" + Escape(configuration.FirmwareVersion) + "\n"
+                + "WifiSsid=" + Escape(configuration.WifiSsid) + "\n"
+                + "WifiPassword=" + Escape(configuration.WifiPassword) + "\n"
+                + "UseDhcp=" + (configuration.UseDhcp ? "1" : "0") + "\n"
+                + "StaticIpAddress=" + Escape(configuration.StaticIpAddress) + "\n"
+                + "GatewayAddress=" + Escape(configuration.GatewayAddress) + "\n"
+                + "SubnetMask=" + Escape(configuration.SubnetMask) + "\n"
+                + "DnsAddress=" + Escape(configuration.DnsAddress) + "\n"
+                + "ApiBaseUrl=" + Escape(configuration.ApiBaseUrl) + "\n"
+                + "ProvisioningAccessPointName=" + Escape(configuration.ProvisioningAccessPointName) + "\n"
+                + "ProvisioningPassword=" + Escape(configuration.ProvisioningPassword) + "\n"
+                + "ProvisioningAddress=" + Escape(configuration.ProvisioningAddress) + "\n"
+                + "ProvisioningWindowMilliseconds=" + configuration.ProvisioningWindowMilliseconds + "\n";
+        }
+
+        /// <summary>
+        /// Creates configuration from a key-value text file.
+        /// </summary>
+        private static StationConfiguration Deserialize(string content)
+        {
+            if (content == null || content.Length == 0)
+            {
+                return null;
+            }
+
+            StationConfiguration configuration = new StationConfiguration();
+            configuration.StationId = GetValue(content, "StationId");
+            configuration.DeviceHardwareId = GetValue(content, "DeviceHardwareId");
+            configuration.StationName = GetValue(content, "StationName");
+            configuration.FirmwareVersion = GetValue(content, "FirmwareVersion");
+            configuration.WifiSsid = GetValue(content, "WifiSsid");
+            configuration.WifiPassword = GetValue(content, "WifiPassword");
+            configuration.UseDhcp = GetValue(content, "UseDhcp") == "1";
+            configuration.StaticIpAddress = GetValue(content, "StaticIpAddress");
+            configuration.GatewayAddress = GetValue(content, "GatewayAddress");
+            configuration.SubnetMask = GetValue(content, "SubnetMask");
+            configuration.DnsAddress = GetValue(content, "DnsAddress");
+            configuration.ApiBaseUrl = GetValue(content, "ApiBaseUrl");
+            configuration.ProvisioningAccessPointName = GetValue(content, "ProvisioningAccessPointName");
+            configuration.ProvisioningPassword = GetValue(content, "ProvisioningPassword");
+            configuration.ProvisioningAddress = GetValue(content, "ProvisioningAddress");
+            configuration.ProvisioningWindowMilliseconds = ParseInt(GetValue(content, "ProvisioningWindowMilliseconds"), 30000);
+            return configuration;
+        }
+
+        /// <summary>
+        /// Finds and unescapes one value from the configuration text.
+        /// </summary>
+        private static string GetValue(string content, string key)
+        {
+            string marker = key + "=";
+            int start = content.IndexOf(marker);
+            if (start < 0)
+            {
+                return string.Empty;
+            }
+
+            start += marker.Length;
+            int end = content.IndexOf("\n", start);
+            if (end < 0)
+            {
+                end = content.Length;
+            }
+
+            string value = content.Substring(start, end - start);
+            if (value.EndsWith("\r"))
+            {
+                value = value.Substring(0, value.Length - 1);
+            }
+
+            return Unescape(value);
+        }
+
+        /// <summary>
+        /// Parses integer values without throwing from invalid stored data.
+        /// </summary>
+        private static int ParseInt(string value, int defaultValue)
+        {
+            try
+            {
+                return int.Parse(value);
+            }
+            catch
+            {
+                return defaultValue;
+            }
+        }
+
+        /// <summary>
+        /// Escapes separators used by the key-value file.
+        /// </summary>
+        private static string Escape(string value)
+        {
+            if (value == null)
+            {
+                return string.Empty;
+            }
+
+            string escaped = string.Empty;
+            for (int index = 0; index < value.Length; index++)
+            {
+                char character = value[index];
+                if (character == '\\')
+                {
+                    escaped += "\\\\";
+                }
+                else if (character == '\r')
+                {
+                    escaped += "\\r";
+                }
+                else if (character == '\n')
+                {
+                    escaped += "\\n";
+                }
+                else
+                {
+                    escaped += character;
+                }
+            }
+
+            return escaped;
+        }
+
+        /// <summary>
+        /// Restores escaped values from the key-value file.
+        /// </summary>
+        private static string Unescape(string value)
+        {
+            if (value == null)
+            {
+                return string.Empty;
+            }
+
+            string unescaped = string.Empty;
+            for (int index = 0; index < value.Length; index++)
+            {
+                char character = value[index];
+                if (character == '\\' && index + 1 < value.Length)
+                {
+                    char next = value[index + 1];
+                    if (next == 'n')
+                    {
+                        unescaped += '\n';
+                        index++;
+                    }
+                    else if (next == 'r')
+                    {
+                        unescaped += '\r';
+                        index++;
+                    }
+                    else if (next == '\\')
+                    {
+                        unescaped += '\\';
+                        index++;
+                    }
+                    else
+                    {
+                        unescaped += character;
+                    }
+                }
+                else
+                {
+                    unescaped += character;
+                }
+            }
+
+            return unescaped;
         }
     }
 }

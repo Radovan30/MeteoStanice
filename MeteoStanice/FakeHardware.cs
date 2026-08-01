@@ -1,4 +1,6 @@
 using System;
+using System.Diagnostics;
+using System.Threading;
 
 namespace MeteoStanice
 {
@@ -259,7 +261,6 @@ namespace MeteoStanice
             sample.NumberPm4 = 1;
             sample.NumberPm10 = 0.2;
             sample.TypicalParticleSize = 0.6;
-            sample.RawDiagnosticStatus = 0;
             _health = SensorHealth.Ready;
             return SensorReadResult<Sps30Sample>.Success(sample);
         }
@@ -406,6 +407,62 @@ namespace MeteoStanice
             second.AgeMilliseconds = 0;
 
             return new WifiAccessPointObservation[] { first, second };
+        }
+    }
+
+    /// <summary>
+    /// Test setup portal used until the real ESP32 access point backend is connected.
+    /// </summary>
+    public sealed class FakeProvisioningPortal : IProvisioningPortal
+    {
+        private StationConfiguration _pendingConfiguration;
+
+        // Test switch for simulating a saved setup form.
+        public bool SaveImmediately { get; set; }
+
+        // Configuration returned when SaveImmediately is enabled.
+        public StationConfiguration ConfigurationToSave { get; set; }
+
+        /// <summary>
+        /// Starts the fake setup portal.
+        /// </summary>
+        public bool Start(StationConfiguration configuration)
+        {
+            _pendingConfiguration = configuration;
+            Debug.WriteLine("Fake provisioning portal pripraven.");
+            return true;
+        }
+
+        /// <summary>
+        /// Waits for a simulated save or returns timeout after the setup window.
+        /// </summary>
+        public ProvisioningWindowResult WaitForResult(int timeoutMilliseconds)
+        {
+            ProvisioningWindowResult result = new ProvisioningWindowResult();
+
+            if (SaveImmediately)
+            {
+                result.ClientConnected = true;
+                result.ConfigurationSaved = true;
+                result.Configuration = ConfigurationToSave == null ? _pendingConfiguration : ConfigurationToSave;
+                result.Message = "Fake provisioning portal ulozil testovaci konfiguraci.";
+                return result;
+            }
+
+            result.ClientConnected = false;
+            result.ConfigurationSaved = false;
+            result.TimedOut = true;
+            result.Configuration = _pendingConfiguration;
+            result.Message = "Fake provisioning portal vyprsel bez ulozeni.";
+            return result;
+        }
+
+        /// <summary>
+        /// Stops the fake setup portal.
+        /// </summary>
+        public void Stop()
+        {
+            Debug.WriteLine("Fake provisioning portal zastaven.");
         }
     }
 }
