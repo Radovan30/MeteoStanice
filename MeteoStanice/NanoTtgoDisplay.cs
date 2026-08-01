@@ -24,7 +24,9 @@ namespace MeteoStanice
         private string _lastSsidText;
         private string _lastIpText;
         private bool _lastProvisioningActive;
+        private bool _lastWifiConnected;
         private bool _modeIndicatorDrawn;
+        private bool _wifiIndicatorDrawn;
 
         /// <summary>
         /// Initializes SPI routing and the ST7789 display driver.
@@ -92,7 +94,7 @@ namespace MeteoStanice
             {
                 DisplayControl.Clear();
                 ResetCachedState();
-                DrawStatus(0, false, false, string.Empty, "0.0.0.0");
+                DrawStatus(0, false, false, string.Empty, "0.0.0.0", string.Empty);
                 Debug.WriteLine("TTGO display startup pattern vykreslen.");
             }
             catch (Exception exception)
@@ -106,7 +108,7 @@ namespace MeteoStanice
         /// </summary>
         public void ShowBoot(bool provisioningActive)
         {
-            DrawStatus(0, provisioningActive, false, string.Empty, "0.0.0.0");
+            DrawStatus(0, provisioningActive, false, string.Empty, "0.0.0.0", string.Empty);
         }
 
         /// <summary>
@@ -114,16 +116,15 @@ namespace MeteoStanice
         /// </summary>
         public void ShowSetup(string accessPointName, string setupAddress)
         {
-            DrawStatus(true, "SETUP", "AP ON", "SSID " + NormalizeDisplayText(accessPointName, 18), "WEB " + NormalizeDisplayText(setupAddress, 18));
+            DrawStatus(true, false, "SETUP", "AP ON", "SSID " + NormalizeDisplayText(accessPointName, 18), "WEB " + NormalizeDisplayText(setupAddress, 18));
         }
 
         /// <summary>
         /// Shows that the station is connecting to the configured Wi-Fi.
         /// </summary>
-        public void ShowWifiConnecting(string wifiSsid, string wifiPassword)
+        public void ShowWifiConnecting(string wifiSsid)
         {
-            string passwordState = wifiPassword == null || wifiPassword.Length == 0 ? "HESLO -" : "HESLO OK";
-            DrawStatus(false, "METEO", "SSID " + NormalizeDisplayText(wifiSsid, 18), passwordState, "IP 0.0.0.0");
+            DrawStatus(false, false, "METEO", WifiSsidLine(wifiSsid, false, string.Empty), "IP 0.0.0.0", "PRIPOJUJI");
         }
 
         /// <summary>
@@ -131,7 +132,7 @@ namespace MeteoStanice
         /// </summary>
         public void ShowLoading(string step)
         {
-            DrawStatus(false, "BOOT", NormalizeDisplayText(step, 18), string.Empty, string.Empty);
+            DrawStatus(false, false, "BOOT", NormalizeDisplayText(step, 18), string.Empty, string.Empty);
         }
 
         /// <summary>
@@ -139,7 +140,7 @@ namespace MeteoStanice
         /// </summary>
         public void ShowReboot()
         {
-            DrawStatus(true, "REBOOT", "PLEASE WAIT", string.Empty, string.Empty);
+            DrawStatus(true, false, "REBOOT", "PLEASE WAIT", string.Empty, string.Empty);
         }
 
         /// <summary>
@@ -147,10 +148,18 @@ namespace MeteoStanice
         /// </summary>
         public void ShowRuntime(int counter, bool wifiConnected, string wifiSsid, string ipAddress)
         {
-            DrawStatus(counter, false, wifiConnected, wifiSsid, ipAddress);
+            ShowRuntime(counter, wifiConnected, wifiSsid, ipAddress, string.Empty);
         }
 
-        private void DrawStatus(int counter, bool provisioningActive, bool wifiConnected, string wifiSsid, string ipAddress)
+        /// <summary>
+        /// Shows a compact runtime status block with an optional Wi-Fi diagnostic line.
+        /// </summary>
+        public void ShowRuntime(int counter, bool wifiConnected, string wifiSsid, string ipAddress, string wifiMessage)
+        {
+            DrawStatus(counter, false, wifiConnected, wifiSsid, ipAddress, wifiMessage);
+        }
+
+        private void DrawStatus(int counter, bool provisioningActive, bool wifiConnected, string wifiSsid, string ipAddress, string wifiMessage)
         {
             if (!_initialized)
             {
@@ -160,10 +169,9 @@ namespace MeteoStanice
             try
             {
                 string modeText = provisioningActive ? "SETUP" : "METEO";
-                string wifiText = wifiConnected ? "WIFI OK" : "WIFI OFF";
-                string ssidText = "SSID " + NormalizeDisplayText(wifiSsid, 18);
+                string ssidText = WifiSsidLine(wifiSsid, wifiConnected, wifiMessage);
                 string ipText = "IP " + NormalizeDisplayText(ipAddress, 18);
-                DrawStatus(provisioningActive, modeText, wifiText, ssidText, ipText);
+                DrawStatus(provisioningActive, wifiConnected, modeText, ssidText, ipText, NormalizeDisplayText(wifiMessage, 18));
             }
             catch (Exception exception)
             {
@@ -171,14 +179,15 @@ namespace MeteoStanice
             }
         }
 
-        private void DrawStatus(bool provisioningActive, string modeText, string line1, string line2, string line3)
+        private void DrawStatus(bool provisioningActive, bool wifiConnected, string modeText, string line1, string line2, string line3)
         {
             Color modeColor = provisioningActive ? Color.Orange : Color.LimeGreen;
             Color line1Color = line1 == "WIFI OFF" ? Color.DarkRed : Color.White;
 
             DrawModeIndicatorIfChanged(provisioningActive);
+            DrawWifiIndicatorIfChanged(wifiConnected);
             DrawTextLineIfChanged(12, 14, 96, 18, modeText, _lastModeText, modeColor, 2);
-            DrawTextLineIfChanged(12, 42, 132, 10, line1, _lastWifiText, line1Color, 1);
+            DrawTextLineIfChanged(12, 42, 180, 10, line1, _lastWifiText, Color.White, 1);
             DrawTextLineIfChanged(12, 62, 180, 10, line2, _lastSsidText, Color.White, 1);
             DrawTextLineIfChanged(12, 82, 180, 10, line3, _lastIpText, Color.White, 1);
 
@@ -201,6 +210,21 @@ namespace MeteoStanice
             FlushLandscapeBlock(LandscapeWidth - 26, 6, 16, 16);
             _lastProvisioningActive = provisioningActive;
             _modeIndicatorDrawn = true;
+        }
+
+        private void DrawWifiIndicatorIfChanged(bool wifiConnected)
+        {
+            if (_wifiIndicatorDrawn && _lastWifiConnected == wifiConnected)
+            {
+                return;
+            }
+
+            Color color = wifiConnected ? Color.LimeGreen : Color.DarkRed;
+            FillLandscapeBlock(LandscapeWidth - 26, 38, 16, 16, Color.Black);
+            FillLandscapeBlock(LandscapeWidth - 23, 41, 10, 10, color);
+            FlushLandscapeBlock(LandscapeWidth - 26, 38, 16, 16);
+            _lastWifiConnected = wifiConnected;
+            _wifiIndicatorDrawn = true;
         }
 
         private void DrawTextLineIfChanged(int x, int y, int width, int height, string text, string previousText, Color color, int scale)
@@ -228,7 +252,9 @@ namespace MeteoStanice
             _lastSsidText = null;
             _lastIpText = null;
             _lastProvisioningActive = false;
+            _lastWifiConnected = false;
             _modeIndicatorDrawn = false;
+            _wifiIndicatorDrawn = false;
         }
 
         private void DrawLandscapeFilledCircle(int centerX, int centerY, int radius, Color color)
@@ -281,6 +307,56 @@ namespace MeteoStanice
             return text.Length * 6 * scale;
         }
 
+        private static string WifiSsidLine(string wifiSsid, bool wifiConnected, string wifiMessage)
+        {
+            return "SSID " + NormalizeDisplayText(wifiSsid, 20) + " | " + WifiShortState(wifiConnected, wifiMessage);
+        }
+
+        private static string WifiShortState(bool wifiConnected, string wifiMessage)
+        {
+            if (wifiConnected)
+            {
+                return "OK";
+            }
+
+            if (wifiMessage == null || wifiMessage.Length == 0)
+            {
+                return "--";
+            }
+
+            if (wifiMessage.IndexOf("POKUS") >= 0 || wifiMessage.IndexOf("PRIPOJUJI") >= 0)
+            {
+                return "--";
+            }
+
+            if (wifiMessage.IndexOf("HESLO") >= 0)
+            {
+                return "HESLO";
+            }
+
+            if (wifiMessage.IndexOf("SIT") >= 0)
+            {
+                return "SIT";
+            }
+
+            if (wifiMessage.IndexOf("DHCP") >= 0)
+            {
+                return "DHCP";
+            }
+
+            if (wifiMessage.IndexOf("CAS") >= 0)
+            {
+                return "CAS";
+            }
+
+            if (wifiMessage.IndexOf("AUTH") >= 0)
+            {
+                return "AUTH";
+            }
+
+            return "ERR";
+        }
+
         private static char NormalizeDisplayCharacter(char character)
         {
             if (character >= 'a' && character <= 'z')
@@ -292,7 +368,8 @@ namespace MeteoStanice
                 || (character >= '0' && character <= '9')
                 || character == '.'
                 || character == '-'
-                || character == '_')
+                || character == '_'
+                || character == '|')
             {
                 return character;
             }
@@ -409,6 +486,8 @@ namespace MeteoStanice
                     return GetRow(row, 0x00, 0x00, 0x00, 0x1F, 0x00, 0x00, 0x00);
                 case '_':
                     return GetRow(row, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x1F);
+                case '|':
+                    return GetRow(row, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04);
                 default:
                     return 0x00;
             }

@@ -568,13 +568,14 @@ namespace MeteoStanice
                 return string.Empty;
             }
 
-            string decoded = string.Empty;
+            byte[] bytes = new byte[value.Length];
+            int byteCount = 0;
             for (int index = 0; index < value.Length; index++)
             {
                 char character = value[index];
                 if (character == '+')
                 {
-                    decoded += ' ';
+                    bytes[byteCount++] = (byte)' ';
                 }
                 else if (character == '%' && index + 2 < value.Length)
                 {
@@ -582,21 +583,21 @@ namespace MeteoStanice
                     int low = FromHex(value[index + 2]);
                     if (high >= 0 && low >= 0)
                     {
-                        decoded += (char)((high * 16) + low);
+                        bytes[byteCount++] = (byte)((high * 16) + low);
                         index += 2;
                     }
                     else
                     {
-                        decoded += character;
+                        bytes[byteCount++] = (byte)character;
                     }
                 }
                 else
                 {
-                    decoded += character;
+                    bytes[byteCount++] = (byte)character;
                 }
             }
 
-            return decoded;
+            return System.Text.Encoding.UTF8.GetString(bytes, 0, byteCount);
         }
 
         /// <summary>
@@ -963,7 +964,10 @@ namespace MeteoStanice
             bool verified = SameValue(configuration.WifiSsid, verifyConfiguration.WifiSsid)
                 && SameValue(configuration.WifiPassword, verifyConfiguration.WifiPassword)
                 && SameValue(configuration.ApiBaseUrl, verifyConfiguration.ApiBaseUrl);
-            Debug.WriteLine("Provisioning save verify SSID=" + (verifyConfiguration.WifiSsid == string.Empty ? "<nenastaveno>" : verifyConfiguration.WifiSsid) + ", ok=" + verified);
+            Debug.WriteLine("Provisioning save verify SSID=" + (verifyConfiguration.WifiSsid == string.Empty ? "<nenastaveno>" : verifyConfiguration.WifiSsid)
+                + ", password length saved=" + (configuration.WifiPassword == null ? 0 : configuration.WifiPassword.Length)
+                + ", loaded=" + (verifyConfiguration.WifiPassword == null ? 0 : verifyConfiguration.WifiPassword.Length)
+                + ", ok=" + verified);
             return verified;
         }
 

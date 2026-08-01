@@ -60,20 +60,12 @@ namespace MeteoStanice
             NanoDeviceEventUploadService eventUploadService = new NanoDeviceEventUploadService(eventQueue, uploadClient);
             FakeNanoPowerMonitor powerMonitor = new FakeNanoPowerMonitor();
             NanoPowerMonitoringService powerService = new NanoPowerMonitoringService(powerMonitor, eventService);
-            NanoWifiService wifiService = new NanoWifiService(eventService);
             NanoWifiHardwareDiagnostics wifiHardwareDiagnostics = new NanoWifiHardwareDiagnostics();
             NanoServerStatusService serverStatusService = new NanoServerStatusService(eventService);
             int counter = 0;
 
             eventService.Report(identity.StationId, DeviceEventSeverity.Information, DeviceEventCategory.System, DeviceEventCode.DeviceStarted, "Program", "Firmware started.");
-            display.ShowWifiConnecting(configuration.WifiSsid, configuration.WifiPassword);
-            NanoWifiStatus wifiStatus = wifiService.Connect(configuration, identity.StationId);
-            Debug.WriteLine("Wi-Fi state=" + wifiStatus.State.ToString() + ", IP=" + wifiStatus.IpAddress);
-            Debug.WriteLine("Real Wi-Fi target SSID=" + (configuration.WifiSsid == string.Empty ? "<nenastaveno>" : configuration.WifiSsid));
-            wifiHardwareDiagnostics.PrintAdapterCount();
-            bool realWifiConnected = wifiHardwareDiagnostics.TryConnect(configuration);
-            Debug.WriteLine("Real Wi-Fi connected=" + realWifiConnected);
-            wifiHardwareDiagnostics.PrintAllNetworkInterfaces();
+            bool realWifiConnected = ConnectConfiguredWifi(display, wifiHardwareDiagnostics, configuration, 0);
             string displayIpAddress = wifiHardwareDiagnostics.GetWirelessIpAddress();
             if (configuration.ApiBaseUrl != null && configuration.ApiBaseUrl.Length > 0)
             {
@@ -123,7 +115,7 @@ namespace MeteoStanice
                 Debug.WriteLine("Uploaded measurements=" + uploadedMeasurements + ", events=" + uploadedEvents);
                 Debug.WriteLine("Event queue after upload=" + eventQueue.Count);
                 displayIpAddress = realWifiConnected ? wifiHardwareDiagnostics.GetWirelessIpAddress() : "0.0.0.0";
-                display.ShowRuntime(counter, realWifiConnected, configuration.WifiSsid, displayIpAddress);
+                display.ShowRuntime(counter, realWifiConnected, configuration.WifiSsid, displayIpAddress, realWifiConnected ? string.Empty : wifiHardwareDiagnostics.LastConnectionMessage);
 
                 if (buttons.ConsumeSetupRequest())
                 {
@@ -138,6 +130,7 @@ namespace MeteoStanice
                         configuration = configurationService.LoadOrCreateDefault();
                         identity = identityService.CreateIdentity(configuration);
                         Debug.WriteLine("Konfigurace po setupu znovu nactena z flash, SSID=" + (configuration.WifiSsid == string.Empty ? "<nenastaveno>" : configuration.WifiSsid));
+                        realWifiConnected = ConnectConfiguredWifi(display, wifiHardwareDiagnostics, configuration, counter);
                     }
 
                     if (provisioningResult.RebootRequired)
@@ -165,6 +158,22 @@ namespace MeteoStanice
                 counter++;
                 Thread.Sleep(RuntimeLoopDelayMilliseconds);
             }
+        }
+
+        private static bool ConnectConfiguredWifi(NanoTtgoDisplay display, NanoWifiHardwareDiagnostics wifiHardwareDiagnostics, StationConfiguration configuration, int counter)
+        {
+            display.ShowWifiConnecting(configuration.WifiSsid);
+            Debug.WriteLine("Real Wi-Fi target SSID=" + (configuration.WifiSsid == string.Empty ? "<nenastaveno>" : configuration.WifiSsid));
+            wifiHardwareDiagnostics.PrintAdapterCount();
+            bool realWifiConnected = wifiHardwareDiagnostics.TryConnect(configuration, delegate (string message)
+            {
+                display.ShowRuntime(counter, false, configuration.WifiSsid, wifiHardwareDiagnostics.GetWirelessIpAddress(), message);
+            });
+            Debug.WriteLine("Real Wi-Fi connected=" + realWifiConnected + ", message=" + wifiHardwareDiagnostics.LastConnectionMessage);
+            wifiHardwareDiagnostics.PrintAllNetworkInterfaces();
+            string displayIpAddress = wifiHardwareDiagnostics.GetWirelessIpAddress();
+            display.ShowRuntime(counter, realWifiConnected, configuration.WifiSsid, displayIpAddress, realWifiConnected ? string.Empty : wifiHardwareDiagnostics.LastConnectionMessage);
+            return realWifiConnected;
         }
     }
 }

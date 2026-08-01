@@ -6,16 +6,24 @@ using System.Threading;
 
 namespace MeteoStanice
 {
+    public delegate void WifiConnectionProgressHandler(string message);
+
     /// <summary>
     /// Runs minimal diagnostics against the real nanoFramework Wi-Fi adapter API.
     /// </summary>
     public sealed class NanoWifiHardwareDiagnostics
     {
-        private const int ConnectAttempts = 2;
-        private const int IpWaitMilliseconds = 7000;
+        private const int ConnectAttempts = 3;
+        private const int ConnectCallTimeoutMilliseconds = 10000;
+        private const int IpWaitMilliseconds = 12000;
         private const int RetryDelayMilliseconds = 250;
         private const int IpPollMilliseconds = 250;
         private bool _scanCompleted;
+
+        /// <summary>
+        /// Last short Wi-Fi connection diagnostic suitable for display/logging.
+        /// </summary>
+        public string LastConnectionMessage { get; private set; }
 
         /// <summary>
         /// Prints the number of Wi-Fi adapters visible to the firmware.
@@ -78,9 +86,20 @@ namespace MeteoStanice
         /// </summary>
         public bool TryConnect(StationConfiguration configuration)
         {
+            return TryConnect(configuration, null);
+        }
+
+        /// <summary>
+        /// Attempts to connect to configured Wi-Fi and reports short progress messages.
+        /// </summary>
+        public bool TryConnect(StationConfiguration configuration, WifiConnectionProgressHandler progressHandler)
+        {
+            LastConnectionMessage = string.Empty;
             if (configuration == null || configuration.WifiSsid == null || configuration.WifiSsid.Length == 0)
             {
                 Debug.WriteLine("Real Wi-Fi connect skipped: SSID empty.");
+                LastConnectionMessage = "SSID CHYBI";
+                ReportProgress(progressHandler, LastConnectionMessage);
                 return false;
             }
 
@@ -91,6 +110,8 @@ namespace MeteoStanice
                 if (adapters == null || adapters.Length == 0)
                 {
                     Debug.WriteLine("Real Wi-Fi connect failed: no adapter.");
+                    LastConnectionMessage = "ADAPTER CHYBI";
+                    ReportProgress(progressHandler, LastConnectionMessage);
                     return false;
                 }
 
@@ -100,14 +121,38 @@ namespace MeteoStanice
 
                 for (int attempt = 1; attempt <= ConnectAttempts; attempt++)
                 {
-                    WifiConnectionResult result = adapter.Connect(configuration.WifiSsid, WifiReconnectionKind.Manual, configuration.WifiPassword);
-                    Debug.WriteLine("Real Wi-Fi connect attempt " + attempt + " status: " + result.ConnectionStatus.ToString());
-                    if (result.ConnectionStatus == WifiConnectionStatus.Success && WaitForValidWirelessIp(IpWaitMilliseconds))
+                    adapter.Disconnect();
+                    Thread.Sleep(100);
+                    LastConnectionMessage = "POKUS " + attempt;
+                    ReportProgress(progressHandler, LastConnectionMessage);
+
+                    WifiConnectionResult result = ConnectWithTimeout(adapter, configuration, ConnectCallTimeoutMilliseconds);
+                    if (result == null)
                     {
+                        LastConnectionMessage = "CAS VYPRSEL";
+                        Debug.WriteLine("Real Wi-Fi connect attempt " + attempt + " status: driver timeout.");
+                        ReportProgress(progressHandler, LastConnectionMessage);
+                        Thread.Sleep(RetryDelayMilliseconds);
+                        continue;
+                    }
+
+                    Debug.WriteLine("Real Wi-Fi connect attempt " + attempt + " status: " + result.ConnectionStatus.ToString());
+                    if (WaitForValidWirelessIp(IpWaitMilliseconds))
+                    {
+                        LastConnectionMessage = "PRIPOJENO";
+                        ReportProgress(progressHandler, LastConnectionMessage);
                         return true;
                     }
 
+                    LastConnectionMessage = ToDisplayConnectionMessage(result.ConnectionStatus);
+                    ReportProgress(progressHandler, LastConnectionMessage);
                     Thread.Sleep(RetryDelayMilliseconds);
+                }
+
+                if (LastConnectionMessage == string.Empty || LastConnectionMessage == "OKAMZIK")
+                {
+                    LastConnectionMessage = "DHCP TIMEOUT";
+                    ReportProgress(progressHandler, LastConnectionMessage);
                 }
 
                 return false;
@@ -115,6 +160,8 @@ namespace MeteoStanice
             catch (Exception exception)
             {
                 Debug.WriteLine("Real Wi-Fi connect failed: " + exception.Message);
+                LastConnectionMessage = "WIFI CHYBA";
+                ReportProgress(progressHandler, LastConnectionMessage);
                 return false;
             }
         }
@@ -343,6 +390,66 @@ namespace MeteoStanice
             {
                 WifiAvailableNetwork network = report.AvailableNetworks[index];
                 Debug.WriteLine("Wi-Fi network " + index + ": " + network.Ssid + " RSSI=" + network.NetworkRssiInDecibelMilliwatts);
+            }
+        }
+
+        private static string ToDisplayConnectionMessage(WifiConnectionStatus status)
+        {
+            switch (status)
+            {
+                case WifiConnectionStatus.InvalidCredential:
+                    return "HESLO CHYBA";
+                case WifiConnectionStatus.NetworkNotAvailable:
+                    return "SIT NENALEZ";
+                case WifiConnectionStatus.Timeout:
+                    return "CAS VYPRSEL";
+                case WifiConnectionStatus.UnsupportedAuthenticationProtocol:
+                    return "AUTH CHYBA";
+                case WifiConnectionStatus.AccessRevoked:
+                    return "PRISTUP ODMIT";
+                case WifiConnectionStatus.Success:
+                    return "DHCP TIMEOUT";
+                default:
+                    return "WIFI SELHALA";
+            }
+        }
+
+        private static WifiConnectionResult ConnectWithTimeout(WifiAdapter adapter, StationConfiguration configuration, int timeoutMilliseconds)
+        {
+            WifiConnectionResult connectionResult = null;
+            Exception connectionException = null;
+
+            Thread connectThread = new Thread(delegate ()
+            {
+                try
+                {
+                    connectionResult = adapter.Connect(configuration.WifiSsid, WifiReconnectionKind.Manual, configuration.WifiPassword);
+                }
+                catch (Exception exception)
+                {
+                    connectionException = exception;
+                }
+            });
+
+            connectThread.Start();
+            if (!connectThread.Join(timeoutMilliseconds))
+            {
+                return null;
+            }
+
+            if (connectionException != null)
+            {
+                throw connectionException;
+            }
+
+            return connectionResult;
+        }
+
+        private static void ReportProgress(WifiConnectionProgressHandler progressHandler, string message)
+        {
+            if (progressHandler != null)
+            {
+                progressHandler(message);
             }
         }
     }
