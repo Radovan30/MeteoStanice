@@ -10,6 +10,8 @@
     <ProjectTypeGuids>{11A8DD76-328B-46DF-9F39-F559912D0360};{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}</ProjectTypeGuids>
     <ProjectGuid>d46601e5-0fee-499b-b822-772169cf9fe0</ProjectGuid>
     <OutputType>Exe</OutputType>
+    <DocumentationFile>bin\$(Configuration)\MeteoStanice.xml</DocumentationFile>
+    <NoWarn>$(NoWarn);1591</NoWarn>
     <AppDesignerFolder>Properties</AppDesignerFolder>
     <FileAlignment>512</FileAlignment>
     <RootNamespace>MeteoStanice</RootNamespace>
@@ -18,8 +20,22 @@
   </PropertyGroup>
   <Import Project="$(NanoFrameworkProjectSystemPath)NFProjectSystem.props" Condition="Exists('$(NanoFrameworkProjectSystemPath)NFProjectSystem.props')" />
   <ItemGroup>
+    <Compile Include="ConfigurationStores.cs" />
+    <Compile Include="DateTimeState.cs" />
+    <Compile Include="DomainModels.cs" />
+    <Compile Include="Enums.cs" />
+    <Compile Include="FakeHardware.cs" />
+    <Compile Include="InMemoryPersistentQueue.cs" />
+    <Compile Include="Interfaces.cs" />
+    <Compile Include="MeasurementAggregationService.cs" />
+    <Compile Include="MeasurementCoordinator.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
+    <Compile Include="RunningStatistics.cs" />
+    <Compile Include="SensorDrivers.cs" />
+    <Compile Include="SensorReadResult.cs" />
+    <Compile Include="Services.cs" />
+    <Compile Include="TestScenarioRunner.cs" />
   </ItemGroup>
   <ItemGroup>
     <Reference Include="mscorlib">
