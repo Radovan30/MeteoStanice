@@ -11,6 +11,10 @@ namespace MeteoStanice
     /// </summary>
     public sealed class NanoWifiHardwareDiagnostics
     {
+        private const int ConnectAttempts = 2;
+        private const int IpWaitMilliseconds = 7000;
+        private const int RetryDelayMilliseconds = 250;
+        private const int IpPollMilliseconds = 250;
         private bool _scanCompleted;
 
         /// <summary>
@@ -94,16 +98,16 @@ namespace MeteoStanice
                 adapter.SetDeviceName(configuration.StationName);
                 ApplyMeteoIpConfiguration(configuration);
 
-                for (int attempt = 1; attempt <= 3; attempt++)
+                for (int attempt = 1; attempt <= ConnectAttempts; attempt++)
                 {
-                    WifiConnectionResult result = adapter.Connect(configuration.WifiSsid, WifiReconnectionKind.Automatic, configuration.WifiPassword);
+                    WifiConnectionResult result = adapter.Connect(configuration.WifiSsid, WifiReconnectionKind.Manual, configuration.WifiPassword);
                     Debug.WriteLine("Real Wi-Fi connect attempt " + attempt + " status: " + result.ConnectionStatus.ToString());
-                    if (result.ConnectionStatus == WifiConnectionStatus.Success && WaitForValidWirelessIp(12000))
+                    if (result.ConnectionStatus == WifiConnectionStatus.Success && WaitForValidWirelessIp(IpWaitMilliseconds))
                     {
                         return true;
                     }
 
-                    Thread.Sleep(1000);
+                    Thread.Sleep(RetryDelayMilliseconds);
                 }
 
                 return false;
@@ -112,6 +116,29 @@ namespace MeteoStanice
             {
                 Debug.WriteLine("Real Wi-Fi connect failed: " + exception.Message);
                 return false;
+            }
+        }
+
+        /// <summary>
+        /// Disconnects the station Wi-Fi client before switching to setup SoftAP mode.
+        /// </summary>
+        public void DisconnectClient()
+        {
+            try
+            {
+                WifiAdapter[] adapters = WifiAdapter.FindAllAdapters();
+                if (adapters == null || adapters.Length == 0)
+                {
+                    Debug.WriteLine("Real Wi-Fi disconnect skipped: no adapter.");
+                    return;
+                }
+
+                adapters[0].Disconnect();
+                Debug.WriteLine("Real Wi-Fi client disconnected before setup AP.");
+            }
+            catch (Exception exception)
+            {
+                Debug.WriteLine("Real Wi-Fi disconnect failed: " + exception.Message);
             }
         }
 
@@ -229,8 +256,8 @@ namespace MeteoStanice
                     return true;
                 }
 
-                Thread.Sleep(500);
-                elapsedMilliseconds += 500;
+                Thread.Sleep(IpPollMilliseconds);
+                elapsedMilliseconds += IpPollMilliseconds;
             }
 
             Debug.WriteLine("Real Wi-Fi IP timeout.");

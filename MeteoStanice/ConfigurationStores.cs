@@ -77,9 +77,9 @@ namespace MeteoStanice
                 Debug.WriteLine("Konfigurace nactena z flash.");
                 return configuration != null;
             }
-            catch
+            catch (System.Exception exception)
             {
-                Debug.WriteLine("Konfiguraci z flash nelze nacist.");
+                Debug.WriteLine("Konfiguraci z flash nelze nacist: " + exception.Message);
                 configuration = null;
                 return false;
             }
@@ -101,9 +101,9 @@ namespace MeteoStanice
                 Debug.WriteLine("Konfigurace ulozena do flash: " + ConfigurationPath);
                 return true;
             }
-            catch
+            catch (System.Exception exception)
             {
-                Debug.WriteLine("Konfiguraci do flash nelze ulozit.");
+                Debug.WriteLine("Konfiguraci do flash nelze ulozit: " + exception.Message);
                 return false;
             }
         }

@@ -2,6 +2,7 @@ using System;
 using System.Device.Gpio;
 using System.Diagnostics;
 using System.Drawing;
+using System.Text;
 using nanoFramework.Hardware.Esp32;
 using nanoFramework.UI;
 using nanoFramework.UI.GraphicDrivers;
@@ -16,6 +17,7 @@ namespace MeteoStanice
         private const int LandscapeWidth = 240;
         private const int LandscapeHeight = 135;
         private GpioController _gpioController;
+        private nanoFramework.UI.Bitmap _surface;
         private bool _initialized;
         private string _lastModeText;
         private string _lastWifiText;
@@ -53,6 +55,7 @@ namespace MeteoStanice
                 Debug.WriteLine("TTGO display DisplayControl.Initialize start.");
                 DisplayControl.Initialize(spiConfiguration, screenConfiguration, 1024);
                 Debug.WriteLine("TTGO display DisplayControl.Initialize hotovo.");
+                _surface = new nanoFramework.UI.Bitmap(BoardProfile.DisplayWidth, BoardProfile.DisplayHeight);
                 DisplayControl.Clear();
                 _initialized = true;
                 ResetCachedState();
@@ -115,11 +118,20 @@ namespace MeteoStanice
         }
 
         /// <summary>
+        /// Shows that the station is connecting to the configured Wi-Fi.
+        /// </summary>
+        public void ShowWifiConnecting(string wifiSsid, string wifiPassword)
+        {
+            string passwordState = wifiPassword == null || wifiPassword.Length == 0 ? "HESLO -" : "HESLO OK";
+            DrawStatus(false, "METEO", "SSID " + NormalizeDisplayText(wifiSsid, 18), passwordState, "IP 0.0.0.0");
+        }
+
+        /// <summary>
         /// Shows an early boot loading step.
         /// </summary>
         public void ShowLoading(string step)
         {
-            DrawStatus(false, "LOAD", NormalizeDisplayText(step, 18), string.Empty, string.Empty);
+            DrawStatus(false, "BOOT", NormalizeDisplayText(step, 18), string.Empty, string.Empty);
         }
 
         /// <summary>
@@ -183,9 +195,10 @@ namespace MeteoStanice
                 return;
             }
 
-            FillLandscapeBlock(LandscapeWidth - 28, 4, 24, 24, Color.Black);
             Color color = provisioningActive ? Color.Orange : Color.LimeGreen;
-            DrawLandscapeFilledCircle(LandscapeWidth - 16, 16, 8, color);
+            FillLandscapeBlock(LandscapeWidth - 26, 6, 16, 16, Color.Black);
+            FillLandscapeBlock(LandscapeWidth - 23, 9, 10, 10, color);
+            FlushLandscapeBlock(LandscapeWidth - 26, 6, 16, 16);
             _lastProvisioningActive = provisioningActive;
             _modeIndicatorDrawn = true;
         }
@@ -197,13 +210,19 @@ namespace MeteoStanice
                 return;
             }
 
-            FillLandscapeBlock(x, y, width, height, Color.Black);
+            int clearWidth = MaxTextWidth(text, previousText, scale) + (scale * 2);
+            if (clearWidth > width)
+            {
+                clearWidth = width;
+            }
+
+            FillLandscapeBlock(x, y, clearWidth, height, Color.Black);
             DrawLandscapeText(x, y, text, color, scale);
+            FlushLandscapeBlock(x, y, clearWidth, height);
         }
 
         private void ResetCachedState()
         {
-            FillLandscapeBlock(0, 0, LandscapeWidth, LandscapeHeight, Color.Black);
             _lastModeText = null;
             _lastWifiText = null;
             _lastSsidText = null;
@@ -212,7 +231,7 @@ namespace MeteoStanice
             _modeIndicatorDrawn = false;
         }
 
-        private static void DrawLandscapeFilledCircle(int centerX, int centerY, int radius, Color color)
+        private void DrawLandscapeFilledCircle(int centerX, int centerY, int radius, Color color)
         {
             int radiusSquared = radius * radius;
 
@@ -235,14 +254,31 @@ namespace MeteoStanice
                 return "-";
             }
 
-            string result = string.Empty;
+            StringBuilder result = new StringBuilder();
             int length = value.Length > maxLength ? maxLength : value.Length;
             for (int index = 0; index < length; index++)
             {
-                result += NormalizeDisplayCharacter(value[index]);
+                result.Append(NormalizeDisplayCharacter(value[index]));
             }
 
-            return result;
+            return result.ToString();
+        }
+
+        private static int MaxTextWidth(string currentText, string previousText, int scale)
+        {
+            int currentWidth = TextWidth(currentText, scale);
+            int previousWidth = TextWidth(previousText, scale);
+            return currentWidth > previousWidth ? currentWidth : previousWidth;
+        }
+
+        private static int TextWidth(string text, int scale)
+        {
+            if (text == null || text.Length == 0)
+            {
+                return 0;
+            }
+
+            return text.Length * 6 * scale;
         }
 
         private static char NormalizeDisplayCharacter(char character)
@@ -264,7 +300,7 @@ namespace MeteoStanice
             return '-';
         }
 
-        private static void DrawLandscapeText(int x, int y, string text, Color color, int scale)
+        private void DrawLandscapeText(int x, int y, string text, Color color, int scale)
         {
             int cursorX = x;
 
@@ -275,7 +311,7 @@ namespace MeteoStanice
             }
         }
 
-        private static void DrawLandscapeCharacter(int x, int y, char character, Color color, int scale)
+        private void DrawLandscapeCharacter(int x, int y, char character, Color color, int scale)
         {
             for (int row = 0; row < 7; row++)
             {
@@ -399,7 +435,7 @@ namespace MeteoStanice
             }
         }
 
-        private static void FillLandscapeBlock(int x, int y, int width, int height, Color color)
+        private void FillLandscapeBlock(int x, int y, int width, int height, Color color)
         {
             for (int row = 0; row < height; row++)
             {
@@ -410,7 +446,7 @@ namespace MeteoStanice
             }
         }
 
-        private static void WriteLandscapePoint(int x, int y, Color color)
+        private void WriteLandscapePoint(int x, int y, Color color)
         {
             if (x < 0 || x >= LandscapeWidth || y < 0 || y >= LandscapeHeight)
             {
@@ -419,7 +455,52 @@ namespace MeteoStanice
 
             int nativeX = y;
             int nativeY = BoardProfile.DisplayHeight - 1 - x;
+            if (_surface != null)
+            {
+                _surface.SetPixel(nativeX, nativeY, color);
+                return;
+            }
+
             DisplayControl.WritePoint((ushort)nativeX, (ushort)nativeY, color);
+        }
+
+        private void FlushLandscapeBlock(int x, int y, int width, int height)
+        {
+            if (_surface == null || width <= 0 || height <= 0)
+            {
+                return;
+            }
+
+            if (x < 0)
+            {
+                width += x;
+                x = 0;
+            }
+
+            if (y < 0)
+            {
+                height += y;
+                y = 0;
+            }
+
+            if (x + width > LandscapeWidth)
+            {
+                width = LandscapeWidth - x;
+            }
+
+            if (y + height > LandscapeHeight)
+            {
+                height = LandscapeHeight - y;
+            }
+
+            if (width <= 0 || height <= 0)
+            {
+                return;
+            }
+
+            int nativeX = y;
+            int nativeY = BoardProfile.DisplayHeight - x - width;
+            _surface.Flush(nativeX, nativeY, height, width);
         }
     }
 }

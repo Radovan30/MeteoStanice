@@ -11,7 +11,7 @@ namespace MeteoStanice
         public bool ConfigurationSaved { get; set; }
         // True when the setup window elapsed without saving.
         public bool TimedOut { get; set; }
-        // True when setup mode was closed by holding the setup button again.
+        // True when setup mode was closed by pressing the setup button again.
         public bool CancelledByButton { get; set; }
         // Configuration saved through the setup portal.
         public StationConfiguration Configuration { get; set; }
@@ -37,7 +37,7 @@ namespace MeteoStanice
         /// <summary>
         /// Waits until settings are saved or setup mode is closed by button.
         /// </summary>
-        ProvisioningWindowResult WaitForResultUntilCancelled(NanoTtgoButtons buttons, int holdMilliseconds);
+        ProvisioningWindowResult WaitForResultUntilCancelled(NanoTtgoButtons buttons);
 
         /// <summary>
         /// Stops the setup portal and releases network resources.

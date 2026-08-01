@@ -156,11 +156,6 @@ namespace MeteoStanice
             return configuration != null
                 && configuration.StationId != null
                 && configuration.DeviceHardwareId != null
-                && configuration.StaticIpAddress != null
-                && configuration.GatewayAddress != null
-                && configuration.SubnetMask != null
-                && configuration.DnsAddress != null
-                && configuration.ProvisioningAddress != null
                 && configuration.ProvisioningWindowMilliseconds > 0;
         }
 

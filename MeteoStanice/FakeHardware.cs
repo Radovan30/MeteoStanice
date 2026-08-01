@@ -460,7 +460,7 @@ namespace MeteoStanice
         /// <summary>
         /// Waits for a simulated save or returns button cancellation.
         /// </summary>
-        public ProvisioningWindowResult WaitForResultUntilCancelled(NanoTtgoButtons buttons, int holdMilliseconds)
+        public ProvisioningWindowResult WaitForResultUntilCancelled(NanoTtgoButtons buttons)
         {
             ProvisioningWindowResult result = WaitForResult(0);
             if (!result.ConfigurationSaved)

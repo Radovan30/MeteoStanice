@@ -21,10 +21,28 @@ namespace MeteoStanice
         private Thread _serverThread;
         private DhcpServer _dhcpServer;
         private NanoDnsResponder _dnsResponder;
+        private readonly IStationConfigurationStore _configurationStore;
+        private readonly StationConfigurationService _configurationService;
         private StationConfiguration _baseConfiguration;
         private ProvisioningWindowResult _result;
         private bool _running;
         private bool _scanCompleted;
+
+        /// <summary>
+        /// Creates a provisioning portal that only returns submitted configuration to its caller.
+        /// </summary>
+        public NanoFrameworkProvisioningPortal()
+        {
+        }
+
+        /// <summary>
+        /// Creates a provisioning portal that saves submitted configuration immediately.
+        /// </summary>
+        public NanoFrameworkProvisioningPortal(IStationConfigurationStore configurationStore, StationConfigurationService configurationService)
+        {
+            _configurationStore = configurationStore;
+            _configurationService = configurationService;
+        }
 
         /// <summary>
         /// Starts the SoftAP, DHCP server and web server.
@@ -37,7 +55,7 @@ namespace MeteoStanice
 
             if (!ConfigureAccessPoint(configuration))
             {
-                Debug.WriteLine("SoftAP konfigurace byla ulozena, pro aktivaci je nutny restart.");
+                Debug.WriteLine("SoftAP konfigurace se nepodarila pripravit.");
                 return false;
             }
 
@@ -114,21 +132,16 @@ namespace MeteoStanice
         }
 
         /// <summary>
-        /// Waits until settings are saved or the setup button is held again.
+        /// Waits until settings are saved or the setup button is pressed again.
         /// </summary>
-        public ProvisioningWindowResult WaitForResultUntilCancelled(NanoTtgoButtons buttons, int holdMilliseconds)
+        public ProvisioningWindowResult WaitForResultUntilCancelled(NanoTtgoButtons buttons)
         {
             int elapsed = 0;
             int nextLog = 0;
 
             while (true)
             {
-                if (_result != null && _result.ConfigurationSaved)
-                {
-                    return _result;
-                }
-
-                if (buttons != null && buttons.ConsumeSetupRequest(holdMilliseconds))
+                if (buttons != null && buttons.ConsumeSetupRequest())
                 {
                     _running = false;
                     if (_result == null)
@@ -137,9 +150,12 @@ namespace MeteoStanice
                     }
 
                     _result.CancelledByButton = true;
-                    _result.ConfigurationSaved = false;
                     _result.TimedOut = false;
-                    _result.Configuration = _baseConfiguration;
+                    if (_result.Configuration == null)
+                    {
+                        _result.Configuration = _baseConfiguration;
+                    }
+
                     _result.Message = "Setup rezim ukoncen tlacitkem.";
                     Debug.WriteLine("Provisioning portal ukoncen tlacitkem.");
                     return _result;
@@ -147,7 +163,7 @@ namespace MeteoStanice
 
                 if (elapsed >= nextLog)
                 {
-                    Debug.WriteLine("Provisioning portal ceka na ulozeni nebo tlacitko, elapsed ms: " + elapsed);
+                    Debug.WriteLine("Provisioning portal ceka na tlacitko pro navrat, saved=" + (_result != null && _result.ConfigurationSaved) + ", elapsed ms: " + elapsed);
                     nextLog += 5000;
                 }
 
@@ -201,7 +217,7 @@ namespace MeteoStanice
                 return false;
             }
 
-            if (accessPointConfiguration.Options == (WirelessAPConfiguration.ConfigurationOptions.Enable | WirelessAPConfiguration.ConfigurationOptions.AutoStart)
+            if (accessPointConfiguration.Options == WirelessAPConfiguration.ConfigurationOptions.Enable
                 && accessPointConfiguration.Ssid == configuration.ProvisioningAccessPointName
                 && accessPointConfiguration.Password == configuration.ProvisioningPassword)
             {
@@ -216,13 +232,14 @@ namespace MeteoStanice
             }
 
             networkInterface.EnableStaticIPv4(configuration.ProvisioningAddress, SubnetMask, configuration.ProvisioningAddress);
-            accessPointConfiguration.Options = WirelessAPConfiguration.ConfigurationOptions.Enable | WirelessAPConfiguration.ConfigurationOptions.AutoStart;
+            accessPointConfiguration.Options = WirelessAPConfiguration.ConfigurationOptions.Enable;
             accessPointConfiguration.Ssid = configuration.ProvisioningAccessPointName;
             accessPointConfiguration.MaxConnections = 1;
             accessPointConfiguration.Authentication = System.Net.NetworkInformation.AuthenticationType.WPA2;
             accessPointConfiguration.Password = configuration.ProvisioningPassword;
             accessPointConfiguration.SaveConfiguration();
-            return false;
+            Debug.WriteLine("SoftAP konfigurace ulozena a povolena pro okamzity setup bez AutoStart.");
+            return true;
         }
 
         private static void DisableAccessPointConfiguration()
@@ -328,31 +345,42 @@ namespace MeteoStanice
                     return;
                 }
 
-                if (path.IndexOf("/?ssid=") == 0)
-                {
-                    _baseConfiguration.WifiSsid = UrlDecode(path.Substring(7, path.Length - 7));
-                    WriteHtml(client, CreatePage("Wi-Fi SSID predvyplneno ze seznamu."));
-                    return;
-                }
-
                 if (method == "POST")
                 {
                     Hashtable values = ParseForm(GetRequestBody(rawRequest));
+                    Debug.WriteLine("Provisioning POST keys: ssid=" + HasValue(values, "ssid")
+                        + ", password=" + HasValue(values, "password")
+                        + ", api=" + HasValue(values, "api")
+                        + ", dhcp=" + HasValue(values, "dhcp"));
                     StationConfiguration newConfiguration = BuildConfiguration(values);
 
                     if (newConfiguration == null)
                     {
-                        WriteHtml(client, CreatePage("PIN neni platny, konfigurace nebyla ulozena."));
+                        WriteHtml(client, CreateResultPage(false, "CHYBA", "Wi-Fi SSID nebo Wi-Fi heslo neni vyplnene. Nastaveni nebylo ulozeno."));
                         return;
                     }
 
                     _result.Configuration = newConfiguration;
-                    _result.ConfigurationSaved = true;
+                    _result.ConfigurationSaved = SaveSubmittedConfiguration(newConfiguration);
                     _result.TimedOut = false;
-                    _result.Message = "Konfigurace byla prijata z weboveho nastaveni.";
-                    Debug.WriteLine("Provisioning web ulozil SSID: " + (newConfiguration.WifiSsid == string.Empty ? "<nenastaveno>" : newConfiguration.WifiSsid));
-                    WriteHtml(client, CreatePage("Nastaveni ulozeno. Stanice prechazi do meteo rezimu."));
-                    _running = false;
+                    _result.Message = _result.ConfigurationSaved ? "Konfigurace byla ulozena z weboveho nastaveni." : "Konfiguraci se nepodarilo ulozit.";
+                    if (_result.ConfigurationSaved)
+                    {
+                        _baseConfiguration = CloneConfiguration(newConfiguration);
+                    }
+
+                    Debug.WriteLine("Provisioning web ulozil SSID: " + (newConfiguration.WifiSsid == string.Empty ? "<nenastaveno>" : newConfiguration.WifiSsid) + ", saved=" + _result.ConfigurationSaved);
+                    WriteHtml(client, CreateResultPage(
+                        _result.ConfigurationSaved,
+                        _result.ConfigurationSaved ? "ULOZENO" : "CHYBA",
+                        _result.ConfigurationSaved ? "Nastaveni bylo ulozeno. Pro navrat do meteo rezimu stiskni tlacitko na desce." : "Nastaveni se nepodarilo ulozit do flash pameti."));
+                    return;
+                }
+
+                if (path.IndexOf("/?ssid=") == 0)
+                {
+                    _baseConfiguration.WifiSsid = UrlDecode(path.Substring(7, path.Length - 7));
+                    WriteHtml(client, CreatePage("Wi-Fi SSID predvyplneno ze seznamu."));
                     return;
                 }
 
@@ -469,16 +497,23 @@ namespace MeteoStanice
 
         private StationConfiguration BuildConfiguration(Hashtable values)
         {
-            string pin = GetValue(values, "pin");
-            if (pin != _baseConfiguration.ProvisioningPassword)
-            {
-                return null;
-            }
-
             StationConfiguration configuration = CloneConfiguration(_baseConfiguration);
             configuration.WifiSsid = GetValue(values, "ssid");
             configuration.WifiPassword = GetValue(values, "password");
             configuration.ApiBaseUrl = GetValue(values, "api");
+
+            if (configuration.WifiSsid == null || configuration.WifiSsid.Length == 0)
+            {
+                Debug.WriteLine("Provisioning form odmitnut: SSID je prazdne.");
+                return null;
+            }
+
+            if (configuration.WifiPassword == null || configuration.WifiPassword.Length == 0)
+            {
+                Debug.WriteLine("Provisioning form odmitnut: Wi-Fi heslo je prazdne.");
+                return null;
+            }
+
             configuration.UseDhcp = GetValue(values, "dhcp") == "on";
             configuration.StaticIpAddress = GetValue(values, "ip");
             configuration.GatewayAddress = GetValue(values, "gateway");
@@ -518,6 +553,12 @@ namespace MeteoStanice
         {
             object value = values[key];
             return value == null ? string.Empty : (string)value;
+        }
+
+        private static bool HasValue(Hashtable values, string key)
+        {
+            object value = values[key];
+            return value != null && ((string)value).Length > 0;
         }
 
         private static string UrlDecode(string value)
@@ -683,8 +724,9 @@ namespace MeteoStanice
                 + "h1{font-size:24px;margin:4px 0 2px}.sub{color:#9fb0c4;margin:0 0 16px}.box{border:1px solid #2d3b4c;border-radius:8px;padding:14px;background:#151d28}"
                 + "label{display:block;margin-top:10px;font-size:13px;color:#b8c4d4}input{width:100%;margin-top:4px;padding:9px;border:1px solid #344456;border-radius:6px;background:#0d131b;color:#fff;box-sizing:border-box}"
                 + ".row{display:flex;align-items:center;gap:8px;margin-top:10px}.row input{width:auto;margin:0}.btn,a.btn{display:inline-block;margin-top:14px;padding:10px 12px;border-radius:6px;background:#1f8cff;color:white;text-decoration:none;border:0}"
-                + ".msg{margin-top:12px;color:#ffd166}.hint{font-size:12px;color:#90a0b4;margin-top:12px}</style>"
-                + "</head><body><div class=\"wrap\"><h1>MeteoStanice</h1><p class=\"sub\">Nastaveni Wi-Fi a serveru</p><div class=\"box\"><form method=\"post\">"
+                + ".msg{margin-top:12px;color:#ffd166}.hint{font-size:12px;color:#90a0b4;margin-top:12px}.current{font-size:12px;color:#cbd6e2;line-height:1.5;margin:10px 0 4px}</style>"
+                + "</head><body><div class=\"wrap\"><h1>MeteoStanice</h1><p class=\"sub\">Nastaveni Wi-Fi a serveru</p><div class=\"box\"><form method=\"post\" action=\"/\">"
+                + "<div class=\"current\">Aktualne: SSID " + HtmlEncode(DisplayValue(_baseConfiguration.WifiSsid)) + "<br>Heslo " + PasswordState(_baseConfiguration.WifiPassword) + "<br>API " + HtmlEncode(DisplayValue(_baseConfiguration.ApiBaseUrl)) + "<br>DHCP " + (_baseConfiguration.UseDhcp ? "zapnuto" : "vypnuto") + "</div>"
                 + "<a class=\"btn\" href=\"/scan\">Vybrat Wi-Fi</a>"
                 + Field("ssid", "Wi-Fi SSID", _baseConfiguration.WifiSsid, "text")
                 + Field("password", "Wi-Fi heslo", _baseConfiguration.WifiPassword, "password")
@@ -694,9 +736,21 @@ namespace MeteoStanice
                 + Field("gateway", "Brana", _baseConfiguration.GatewayAddress, "text")
                 + Field("mask", "Maska", _baseConfiguration.SubnetMask, "text")
                 + Field("dns", "DNS", _baseConfiguration.DnsAddress, "text")
-                + Field("pin", "PIN", string.Empty, "password")
                 + "<button class=\"btn\" type=\"submit\">Ulozit</button></form><p class=\"msg\">" + message + "</p>"
-                + "<p class=\"hint\">Po ulozeni se stanice restartuje do meteo rezimu.</p></div></div></body></html>";
+                + "<p class=\"hint\">Po ulozeni zustane setup zapnuty. Do meteo rezimu se vrat tlacitkem.</p></div></div></body></html>";
+        }
+
+        private string CreateResultPage(bool saved, string title, string message)
+        {
+            string color = saved ? "#74d680" : "#ff7b72";
+            return "<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+                + "<title>MeteoStanice setup</title>"
+                + "<style>body{font-family:Arial,sans-serif;margin:0;background:#10151d;color:#edf2f7}.wrap{max-width:440px;margin:0 auto;padding:18px}"
+                + ".box{border:1px solid #2d3b4c;border-radius:8px;padding:16px;background:#151d28}.status{font-size:26px;font-weight:bold;color:" + color + ";margin:0 0 8px}"
+                + "p{line-height:1.45}.current{font-size:13px;color:#cbd6e2;line-height:1.6;margin:12px 0}.btn{display:inline-block;margin-top:12px;padding:10px 12px;border-radius:6px;background:#1f8cff;color:white;text-decoration:none}</style>"
+                + "</head><body><div class=\"wrap\"><div class=\"box\"><div class=\"status\">" + title + "</div><p>" + HtmlEncode(message) + "</p>"
+                + "<div class=\"current\">SSID: " + HtmlEncode(DisplayValue(_baseConfiguration.WifiSsid)) + "<br>Heslo: " + PasswordState(_baseConfiguration.WifiPassword) + "<br>API: " + HtmlEncode(DisplayValue(_baseConfiguration.ApiBaseUrl)) + "<br>DHCP: " + (_baseConfiguration.UseDhcp ? "zapnuto" : "vypnuto") + "</div>"
+                + "<a class=\"btn\" href=\"/\">Zpet do nastaveni</a></div></div></body></html>";
         }
 
         /// <summary>
@@ -759,6 +813,16 @@ namespace MeteoStanice
         private static string Field(string name, string label, string value, string type)
         {
             return "<label>" + label + "<input name=\"" + name + "\" type=\"" + type + "\" value=\"" + HtmlEncode(value) + "\"></label>";
+        }
+
+        private static string DisplayValue(string value)
+        {
+            return value == null || value.Length == 0 ? "<nenastaveno>" : value;
+        }
+
+        private static string PasswordState(string value)
+        {
+            return value == null || value.Length == 0 ? "<nenastaveno>" : "ulozeno";
         }
 
         private void OnAvailableNetworksChanged(WifiAdapter sender, object e)
@@ -868,6 +932,54 @@ namespace MeteoStanice
             configuration.ProvisioningWindowMilliseconds = source.ProvisioningWindowMilliseconds;
             configuration.ProvisioningRequestedOnNextBoot = source.ProvisioningRequestedOnNextBoot;
             return configuration;
+        }
+
+        private bool SaveSubmittedConfiguration(StationConfiguration configuration)
+        {
+            if (_configurationStore == null || _configurationService == null)
+            {
+                return true;
+            }
+
+            if (!_configurationService.Validate(configuration))
+            {
+                Debug.WriteLine("Provisioning save skipped: konfigurace neni platna.");
+                return false;
+            }
+
+            if (!_configurationStore.Save(configuration))
+            {
+                Debug.WriteLine("Provisioning save failed: Save vratil false.");
+                return false;
+            }
+
+            StationConfiguration verifyConfiguration;
+            if (!_configurationStore.TryLoad(out verifyConfiguration))
+            {
+                Debug.WriteLine("Provisioning save failed: konfiguraci nelze po ulozeni nacist.");
+                return false;
+            }
+
+            bool verified = SameValue(configuration.WifiSsid, verifyConfiguration.WifiSsid)
+                && SameValue(configuration.WifiPassword, verifyConfiguration.WifiPassword)
+                && SameValue(configuration.ApiBaseUrl, verifyConfiguration.ApiBaseUrl);
+            Debug.WriteLine("Provisioning save verify SSID=" + (verifyConfiguration.WifiSsid == string.Empty ? "<nenastaveno>" : verifyConfiguration.WifiSsid) + ", ok=" + verified);
+            return verified;
+        }
+
+        private static bool SameValue(string left, string right)
+        {
+            if (left == null)
+            {
+                left = string.Empty;
+            }
+
+            if (right == null)
+            {
+                right = string.Empty;
+            }
+
+            return left == right;
         }
     }
 }

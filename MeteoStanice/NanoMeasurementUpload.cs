@@ -15,6 +15,7 @@ namespace MeteoStanice
         private bool _httpEnabled;
         // Configured API base URL.
         private string _apiBaseUrl;
+        private readonly HttpClient _httpClient;
 
         /// <summary>
         /// Creates an upload client with simulated server available.
@@ -22,6 +23,7 @@ namespace MeteoStanice
         public NanoUploadClient()
         {
             ServerAvailable = true;
+            _httpClient = new HttpClient();
         }
 
         /// <summary>
@@ -95,9 +97,8 @@ namespace MeteoStanice
 
             try
             {
-                HttpClient client = new HttpClient();
                 content = new StringContent(json, Encoding.UTF8, "application/json");
-                response = client.Post(url, content);
+                response = _httpClient.Post(url, content);
                 Debug.WriteLine("HTTP upload " + label + " status=" + (int)response.StatusCode);
                 return response.IsSuccessStatusCode;
             }
@@ -167,33 +168,33 @@ namespace MeteoStanice
                 return string.Empty;
             }
 
-            string escaped = string.Empty;
+            StringBuilder escaped = new StringBuilder(value.Length);
             for (int index = 0; index < value.Length; index++)
             {
                 char character = value[index];
                 if (character == '\\')
                 {
-                    escaped += "\\\\";
+                    escaped.Append("\\\\");
                 }
                 else if (character == '"')
                 {
-                    escaped += "\\\"";
+                    escaped.Append("\\\"");
                 }
                 else if (character == '\r')
                 {
-                    escaped += "\\r";
+                    escaped.Append("\\r");
                 }
                 else if (character == '\n')
                 {
-                    escaped += "\\n";
+                    escaped.Append("\\n");
                 }
                 else
                 {
-                    escaped += character;
+                    escaped.Append(character);
                 }
             }
 
-            return escaped;
+            return escaped.ToString();
         }
     }
 
@@ -232,6 +233,20 @@ namespace MeteoStanice
 
             _queue.TryDequeue(out record);
             return true;
+        }
+
+        /// <summary>
+        /// Uploads pending records until the queue is empty, an upload fails, or the limit is reached.
+        /// </summary>
+        public int TryUploadPending(int maxItems)
+        {
+            int uploaded = 0;
+            while (uploaded < maxItems && TryUploadOne())
+            {
+                uploaded++;
+            }
+
+            return uploaded;
         }
     }
 }

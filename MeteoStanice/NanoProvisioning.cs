@@ -14,7 +14,7 @@ namespace MeteoStanice
         public bool ConfigurationSaved { get; set; }
         // True when setup window elapsed without saving.
         public bool TimedOut { get; set; }
-        // True when setup mode was closed by holding the setup button again.
+        // True when setup mode was closed by pressing the setup button again.
         public bool CancelledByButton { get; set; }
         // Configuration produced by the setup window.
         public StationConfiguration Configuration { get; set; }
@@ -72,9 +72,9 @@ namespace MeteoStanice
         /// <summary>
         /// Runs setup mode until the user saves settings or closes setup by button.
         /// </summary>
-        public NanoProvisioningResult RunUntilSavedOrCancelled(StationConfiguration currentConfiguration, NanoTtgoButtons buttons, int holdMilliseconds)
+        public NanoProvisioningResult RunUntilSavedOrCancelled(StationConfiguration currentConfiguration, NanoTtgoButtons buttons)
         {
-            NanoProvisioningResult result = WaitForPortalResultUntilCancelled(currentConfiguration, buttons, holdMilliseconds);
+            NanoProvisioningResult result = WaitForPortalResultUntilCancelled(currentConfiguration, buttons);
             return ApplyResult(currentConfiguration, result);
         }
 
@@ -82,17 +82,19 @@ namespace MeteoStanice
         {
             if (result.ConfigurationSaved && _configurationService.Validate(result.Configuration))
             {
-                _configurationStore.Save(result.Configuration);
+                if (!SaveAndVerify(result.Configuration))
+                {
+                    Debug.WriteLine("Provisioning konfiguraci neulozil, stanice ponecha puvodni konfiguraci.");
+                    result.ConfigurationSaved = false;
+                    result.TimedOut = false;
+                    result.Configuration = currentConfiguration;
+                    result.Message = "Setup konfiguraci se nepodarilo ulozit do flash.";
+                    return result;
+                }
+
                 Debug.WriteLine("Provisioning ulozil novou konfiguraci.");
                 Debug.WriteLine("Provisioning meteo Wi-Fi: " + (result.Configuration.WifiSsid == string.Empty ? "<nenastaveno>" : result.Configuration.WifiSsid));
                 Debug.WriteLine("Provisioning meteo IP: " + (result.Configuration.UseDhcp ? "DHCP" : result.Configuration.StaticIpAddress));
-                StationConfiguration verifyConfiguration;
-                if (_configurationStore.TryLoad(out verifyConfiguration))
-                {
-                    Debug.WriteLine("Provisioning kontrola flash SSID: " + (verifyConfiguration.WifiSsid == string.Empty ? "<nenastaveno>" : verifyConfiguration.WifiSsid));
-                    Debug.WriteLine("Provisioning kontrola flash heslo delka: " + (verifyConfiguration.WifiPassword == null ? 0 : verifyConfiguration.WifiPassword.Length));
-                }
-
                 return result;
             }
 
@@ -108,6 +110,44 @@ namespace MeteoStanice
 
             result.Configuration = currentConfiguration;
             return result;
+        }
+
+        private bool SaveAndVerify(StationConfiguration configuration)
+        {
+            if (!_configurationStore.Save(configuration))
+            {
+                Debug.WriteLine("Provisioning save failed: Save vratil false.");
+                return false;
+            }
+
+            StationConfiguration verifyConfiguration;
+            if (!_configurationStore.TryLoad(out verifyConfiguration))
+            {
+                Debug.WriteLine("Provisioning save failed: konfiguraci nelze po ulozeni nacist.");
+                return false;
+            }
+
+            Debug.WriteLine("Provisioning kontrola flash SSID: " + (verifyConfiguration.WifiSsid == string.Empty ? "<nenastaveno>" : verifyConfiguration.WifiSsid));
+            Debug.WriteLine("Provisioning kontrola flash heslo delka: " + (verifyConfiguration.WifiPassword == null ? 0 : verifyConfiguration.WifiPassword.Length));
+
+            return SameValue(configuration.WifiSsid, verifyConfiguration.WifiSsid)
+                && SameValue(configuration.WifiPassword, verifyConfiguration.WifiPassword)
+                && SameValue(configuration.ApiBaseUrl, verifyConfiguration.ApiBaseUrl);
+        }
+
+        private static bool SameValue(string left, string right)
+        {
+            if (left == null)
+            {
+                left = string.Empty;
+            }
+
+            if (right == null)
+            {
+                right = string.Empty;
+            }
+
+            return left == right;
         }
 
         /// <summary>
@@ -194,7 +234,7 @@ namespace MeteoStanice
             }
         }
 
-        private NanoProvisioningResult WaitForPortalResultUntilCancelled(StationConfiguration currentConfiguration, NanoTtgoButtons buttons, int holdMilliseconds)
+        private NanoProvisioningResult WaitForPortalResultUntilCancelled(StationConfiguration currentConfiguration, NanoTtgoButtons buttons)
         {
             NanoProvisioningResult result = new NanoProvisioningResult();
             result.Configuration = currentConfiguration;
@@ -213,7 +253,7 @@ namespace MeteoStanice
                 }
 
                 portalStarted = true;
-                ProvisioningWindowResult portalResult = _provisioningPortal.WaitForResultUntilCancelled(buttons, holdMilliseconds);
+                ProvisioningWindowResult portalResult = _provisioningPortal.WaitForResultUntilCancelled(buttons);
                 result.ClientConnected = portalResult.ClientConnected;
                 result.ConfigurationSaved = portalResult.ConfigurationSaved;
                 result.TimedOut = portalResult.TimedOut;

@@ -1,18 +1,16 @@
 using System;
 using System.Device.Gpio;
 using System.Diagnostics;
-using System.Threading;
 
 namespace MeteoStanice
 {
     /// <summary>
-    /// Reads TTGO T-Display buttons and detects long setup presses.
+    /// Reads TTGO T-Display buttons and detects setup button clicks.
     /// </summary>
     public sealed class NanoTtgoButtons
     {
         private GpioController _gpioController;
         private bool _initialized;
-        private long _pressedSinceMilliseconds;
         private bool _requestConsumed;
         private bool _ignoreUntilReleased;
 
@@ -38,44 +36,25 @@ namespace MeteoStanice
         }
 
         /// <summary>
-        /// Blocks briefly after boot and returns true when the setup button is held.
+        /// Returns true immediately when the setup button is pressed during boot.
         /// </summary>
-        public bool IsHeldAtBoot(int holdMilliseconds)
+        public bool IsPressedAtBoot()
         {
-            if (!_initialized)
-            {
-                return false;
-            }
-
-            int elapsed = 0;
-            while (elapsed < holdMilliseconds)
-            {
-                if (!IsPressed())
-                {
-                    return false;
-                }
-
-                Thread.Sleep(100);
-                elapsed += 100;
-            }
-
-            return true;
+            return _initialized && IsPressed();
         }
 
         /// <summary>
-        /// Returns true once when the setup button has been held long enough during runtime.
+        /// Returns true once when the setup button is pressed during runtime.
         /// </summary>
-        public bool ConsumeSetupRequest(int holdMilliseconds)
+        public bool ConsumeSetupRequest()
         {
             if (!_initialized)
             {
                 return false;
             }
 
-            long now = DateTime.UtcNow.Ticks / 10000;
             if (!IsPressed())
             {
-                _pressedSinceMilliseconds = 0;
                 _requestConsumed = false;
                 _ignoreUntilReleased = false;
                 return false;
@@ -86,13 +65,7 @@ namespace MeteoStanice
                 return false;
             }
 
-            if (_pressedSinceMilliseconds == 0)
-            {
-                _pressedSinceMilliseconds = now;
-                return false;
-            }
-
-            if (!_requestConsumed && now - _pressedSinceMilliseconds >= holdMilliseconds)
+            if (!_requestConsumed)
             {
                 _requestConsumed = true;
                 return true;
@@ -115,14 +88,12 @@ namespace MeteoStanice
             {
                 _ignoreUntilReleased = true;
                 _requestConsumed = true;
-                _pressedSinceMilliseconds = 0;
                 Debug.WriteLine("TTGO setup tlacitko ceka na pusteni pred dalsi akci.");
             }
             else
             {
                 _ignoreUntilReleased = false;
                 _requestConsumed = false;
-                _pressedSinceMilliseconds = 0;
             }
         }
 

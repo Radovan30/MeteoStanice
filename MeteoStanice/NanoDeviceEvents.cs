@@ -194,5 +194,19 @@ namespace MeteoStanice
             _queue.TryDequeue(out deviceEvent);
             return true;
         }
+
+        /// <summary>
+        /// Uploads pending events until the queue is empty, an upload fails, or the limit is reached.
+        /// </summary>
+        public int TryUploadPending(int maxItems)
+        {
+            int uploaded = 0;
+            while (uploaded < maxItems && TryUploadOne())
+            {
+                uploaded++;
+            }
+
+            return uploaded;
+        }
     }
 }

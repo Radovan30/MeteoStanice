@@ -35,8 +35,6 @@ namespace MeteoStanice
         public const int DisplayBackLightPin = 4;
         // TTGO T-Display right setup button pin.
         public const int SetupButtonPin = 35;
-        // Button hold time required to open setup mode.
-        public const int SetupButtonHoldMilliseconds = 2000;
         // TTGO T-Display native portrait screen width.
         public const int DisplayWidth = 135;
         // TTGO T-Display native portrait screen height.
