@@ -14,6 +14,8 @@ namespace MeteoStanice
         public bool ConfigurationSaved { get; set; }
         // True when setup window elapsed without saving.
         public bool TimedOut { get; set; }
+        // True when setup mode was closed by holding the setup button again.
+        public bool CancelledByButton { get; set; }
         // Configuration produced by the setup window.
         public StationConfiguration Configuration { get; set; }
         // Short diagnostic message.
@@ -64,7 +66,20 @@ namespace MeteoStanice
         public NanoProvisioningResult RunStartupWindowWithResult(StationConfiguration currentConfiguration)
         {
             NanoProvisioningResult result = WaitForResult(currentConfiguration);
+            return ApplyResult(currentConfiguration, result);
+        }
 
+        /// <summary>
+        /// Runs setup mode until the user saves settings or closes setup by button.
+        /// </summary>
+        public NanoProvisioningResult RunUntilSavedOrCancelled(StationConfiguration currentConfiguration, NanoTtgoButtons buttons, int holdMilliseconds)
+        {
+            NanoProvisioningResult result = WaitForPortalResultUntilCancelled(currentConfiguration, buttons, holdMilliseconds);
+            return ApplyResult(currentConfiguration, result);
+        }
+
+        private NanoProvisioningResult ApplyResult(StationConfiguration currentConfiguration, NanoProvisioningResult result)
+        {
             if (result.ConfigurationSaved && _configurationService.Validate(result.Configuration))
             {
                 _configurationStore.Save(result.Configuration);
@@ -79,6 +94,11 @@ namespace MeteoStanice
                 }
 
                 return result;
+            }
+
+            if (result.CancelledByButton)
+            {
+                Debug.WriteLine("Provisioning ukoncen tlacitkem, stanice pokracuje v meteo rezimu.");
             }
 
             if (result.TimedOut)
@@ -152,6 +172,7 @@ namespace MeteoStanice
                 result.ClientConnected = portalResult.ClientConnected;
                 result.ConfigurationSaved = portalResult.ConfigurationSaved;
                 result.TimedOut = portalResult.TimedOut;
+                result.CancelledByButton = portalResult.CancelledByButton;
                 result.Configuration = portalResult.Configuration;
                 result.Message = portalResult.Message;
                 return result;
@@ -160,6 +181,51 @@ namespace MeteoStanice
             {
                 Debug.WriteLine("Provisioning portal selhal: " + exception.Message);
                 result.TimedOut = true;
+                result.ConfigurationSaved = false;
+                result.Message = "Setup portal failed.";
+                return result;
+            }
+            finally
+            {
+                if (portalStarted)
+                {
+                    _provisioningPortal.Stop();
+                }
+            }
+        }
+
+        private NanoProvisioningResult WaitForPortalResultUntilCancelled(StationConfiguration currentConfiguration, NanoTtgoButtons buttons, int holdMilliseconds)
+        {
+            NanoProvisioningResult result = new NanoProvisioningResult();
+            result.Configuration = currentConfiguration;
+            bool portalStarted = false;
+
+            try
+            {
+                Debug.WriteLine("Provisioning portal startuje v rucnim setup rezimu.");
+                if (_provisioningPortal == null || !_provisioningPortal.Start(currentConfiguration))
+                {
+                    Debug.WriteLine("Provisioning portal nelze spustit v rucnim setup rezimu.");
+                    result.TimedOut = false;
+                    result.RebootRequired = true;
+                    result.Message = "Setup portal did not start.";
+                    return result;
+                }
+
+                portalStarted = true;
+                ProvisioningWindowResult portalResult = _provisioningPortal.WaitForResultUntilCancelled(buttons, holdMilliseconds);
+                result.ClientConnected = portalResult.ClientConnected;
+                result.ConfigurationSaved = portalResult.ConfigurationSaved;
+                result.TimedOut = portalResult.TimedOut;
+                result.CancelledByButton = portalResult.CancelledByButton;
+                result.Configuration = portalResult.Configuration;
+                result.Message = portalResult.Message;
+                return result;
+            }
+            catch (System.Exception exception)
+            {
+                Debug.WriteLine("Provisioning portal selhal v rucnim setup rezimu: " + exception.Message);
+                result.TimedOut = false;
                 result.ConfigurationSaved = false;
                 result.Message = "Setup portal failed.";
                 return result;

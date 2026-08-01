@@ -14,6 +14,7 @@ namespace MeteoStanice
         private bool _initialized;
         private long _pressedSinceMilliseconds;
         private bool _requestConsumed;
+        private bool _ignoreUntilReleased;
 
         /// <summary>
         /// Initializes the setup button input.
@@ -76,6 +77,12 @@ namespace MeteoStanice
             {
                 _pressedSinceMilliseconds = 0;
                 _requestConsumed = false;
+                _ignoreUntilReleased = false;
+                return false;
+            }
+
+            if (_ignoreUntilReleased)
+            {
                 return false;
             }
 
@@ -92,6 +99,31 @@ namespace MeteoStanice
             }
 
             return false;
+        }
+
+        /// <summary>
+        /// Ignores the currently held button until the user releases it.
+        /// </summary>
+        public void IgnoreCurrentPressUntilReleased()
+        {
+            if (!_initialized)
+            {
+                return;
+            }
+
+            if (IsPressed())
+            {
+                _ignoreUntilReleased = true;
+                _requestConsumed = true;
+                _pressedSinceMilliseconds = 0;
+                Debug.WriteLine("TTGO setup tlacitko ceka na pusteni pred dalsi akci.");
+            }
+            else
+            {
+                _ignoreUntilReleased = false;
+                _requestConsumed = false;
+                _pressedSinceMilliseconds = 0;
+            }
         }
 
         private bool IsPressed()

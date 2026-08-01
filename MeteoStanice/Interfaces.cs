@@ -132,6 +132,11 @@ namespace MeteoStanice
         ProvisioningWindowResult WaitForResult(int timeoutMilliseconds);
 
         /// <summary>
+        /// Waits until settings are saved or setup mode is closed by button.
+        /// </summary>
+        ProvisioningWindowResult WaitForResultUntilCancelled(NanoTtgoButtons buttons, int holdMilliseconds);
+
+        /// <summary>
         /// Stops the setup portal and releases network resources.
         /// </summary>
         void Stop();

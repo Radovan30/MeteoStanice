@@ -458,6 +458,22 @@ namespace MeteoStanice
         }
 
         /// <summary>
+        /// Waits for a simulated save or returns button cancellation.
+        /// </summary>
+        public ProvisioningWindowResult WaitForResultUntilCancelled(NanoTtgoButtons buttons, int holdMilliseconds)
+        {
+            ProvisioningWindowResult result = WaitForResult(0);
+            if (!result.ConfigurationSaved)
+            {
+                result.TimedOut = false;
+                result.CancelledByButton = true;
+                result.Message = "Fake provisioning portal ukoncen tlacitkem.";
+            }
+
+            return result;
+        }
+
+        /// <summary>
         /// Stops the fake setup portal.
         /// </summary>
         public void Stop()

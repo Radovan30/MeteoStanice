@@ -69,22 +69,38 @@ namespace MeteoStanice
         }
 
         /// <summary>
+        /// Disables saved SoftAP autostart when the station runs in meteo mode.
+        /// </summary>
+        public static void DisableSavedAccessPoint()
+        {
+            DisableAccessPointConfiguration();
+        }
+
+        /// <summary>
         /// Waits until settings are saved or the setup window expires.
         /// </summary>
         public ProvisioningWindowResult WaitForResult(int timeoutMilliseconds)
         {
             int elapsed = 0;
-            while (_running && elapsed < timeoutMilliseconds)
+            int nextLog = 0;
+            while (elapsed < timeoutMilliseconds)
             {
                 if (_result != null && _result.ConfigurationSaved)
                 {
                     return _result;
                 }
 
+                if (elapsed >= nextLog)
+                {
+                    Debug.WriteLine("Provisioning portal ceka, zbyva ms: " + (timeoutMilliseconds - elapsed));
+                    nextLog += 5000;
+                }
+
                 Thread.Sleep(250);
                 elapsed += 250;
             }
 
+            _running = false;
             if (_result == null)
             {
                 _result = new ProvisioningWindowResult();
@@ -95,6 +111,49 @@ namespace MeteoStanice
             _result.Configuration = _baseConfiguration;
             _result.Message = "Setup okno vyprselo bez ulozeni.";
             return _result;
+        }
+
+        /// <summary>
+        /// Waits until settings are saved or the setup button is held again.
+        /// </summary>
+        public ProvisioningWindowResult WaitForResultUntilCancelled(NanoTtgoButtons buttons, int holdMilliseconds)
+        {
+            int elapsed = 0;
+            int nextLog = 0;
+
+            while (true)
+            {
+                if (_result != null && _result.ConfigurationSaved)
+                {
+                    return _result;
+                }
+
+                if (buttons != null && buttons.ConsumeSetupRequest(holdMilliseconds))
+                {
+                    _running = false;
+                    if (_result == null)
+                    {
+                        _result = new ProvisioningWindowResult();
+                    }
+
+                    _result.CancelledByButton = true;
+                    _result.ConfigurationSaved = false;
+                    _result.TimedOut = false;
+                    _result.Configuration = _baseConfiguration;
+                    _result.Message = "Setup rezim ukoncen tlacitkem.";
+                    Debug.WriteLine("Provisioning portal ukoncen tlacitkem.");
+                    return _result;
+                }
+
+                if (elapsed >= nextLog)
+                {
+                    Debug.WriteLine("Provisioning portal ceka na ulozeni nebo tlacitko, elapsed ms: " + elapsed);
+                    nextLog += 5000;
+                }
+
+                Thread.Sleep(250);
+                elapsed += 250;
+            }
         }
 
         /// <summary>
@@ -123,7 +182,7 @@ namespace MeteoStanice
                 _dnsResponder = null;
             }
 
-            DisableAccessPoint();
+            DisableAccessPointConfiguration();
         }
 
         private bool ConfigureAccessPoint(StationConfiguration configuration)
@@ -166,22 +225,31 @@ namespace MeteoStanice
             return false;
         }
 
-        private void DisableAccessPoint()
+        private static void DisableAccessPointConfiguration()
         {
             NetworkInterface networkInterface = GetAccessPointInterface();
             if (networkInterface == null)
             {
+                Debug.WriteLine("SoftAP vypnuti preskoceno: WirelessAP interface nebyl nalezen.");
                 return;
             }
 
             WirelessAPConfiguration accessPointConfiguration = GetAccessPointConfiguration(networkInterface);
             if (accessPointConfiguration == null)
             {
+                Debug.WriteLine("SoftAP vypnuti preskoceno: konfigurace nebyla nalezena.");
+                return;
+            }
+
+            if (accessPointConfiguration.Options == WirelessAPConfiguration.ConfigurationOptions.None)
+            {
+                Debug.WriteLine("SoftAP uz je vypnuty.");
                 return;
             }
 
             accessPointConfiguration.Options = WirelessAPConfiguration.ConfigurationOptions.None;
             accessPointConfiguration.SaveConfiguration();
+            Debug.WriteLine("SoftAP AutoStart vypnut.");
         }
 
         private static NetworkInterface GetAccessPointInterface()

@@ -38,9 +38,10 @@ namespace MeteoStanice
                 Debug.WriteLine("Provisioning bude spusten pri startu.");
                 Debug.WriteLine("Provisioning duvod: flag=" + setupRequestedOnBoot);
                 display.ShowSetup(configuration.ProvisioningAccessPointName, configuration.ProvisioningHostName);
+                buttons.IgnoreCurrentPressUntilReleased();
                 configuration.ProvisioningRequestedOnNextBoot = true;
                 configurationStore.Save(configuration);
-                NanoProvisioningResult provisioningResult = provisioningService.RunStartupWindowWithResult(configuration);
+                NanoProvisioningResult provisioningResult = provisioningService.RunUntilSavedOrCancelled(configuration, buttons, BoardProfile.SetupButtonHoldMilliseconds);
                 configuration = provisioningResult.Configuration;
                 if (provisioningResult.RebootRequired)
                 {
@@ -56,6 +57,14 @@ namespace MeteoStanice
                 configurationStore.Save(configuration);
                 identity = identityService.CreateIdentity(configuration);
 
+                if (provisioningResult.CancelledByButton)
+                {
+                    Debug.WriteLine("Setup ukoncen tlacitkem, stanice se restartuje do meteo rezimu.");
+                    display.ShowReboot();
+                    Thread.Sleep(500);
+                    Power.RebootDevice(RebootOption.NormalReboot);
+                }
+
                 if (provisioningResult.ConfigurationSaved)
                 {
                     Debug.WriteLine("Provisioning ulozen, stanice se restartuje do meteo rezimu.");
@@ -67,6 +76,8 @@ namespace MeteoStanice
             else
             {
                 Debug.WriteLine("Setup tlacitko nebylo drzene, stanice startuje primo v meteo rezimu.");
+                display.ShowLoading("AP OFF");
+                NanoFrameworkProvisioningPortal.DisableSavedAccessPoint();
             }
 
             Debug.WriteLine("Board: " + BoardProfile.BoardName);
