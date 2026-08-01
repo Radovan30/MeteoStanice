@@ -20,6 +20,8 @@ namespace MeteoStanice
         private nanoFramework.UI.Bitmap _surface;
         private bool _initialized;
         private string _lastModeText;
+        private string _lastDateText;
+        private string _lastTimeText;
         private string _lastWifiText;
         private string _lastSsidText;
         private string _lastIpText;
@@ -156,10 +158,36 @@ namespace MeteoStanice
         /// </summary>
         public void ShowRuntime(int counter, bool wifiConnected, string wifiSsid, string ipAddress, string wifiMessage)
         {
-            DrawStatus(counter, false, wifiConnected, wifiSsid, ipAddress, wifiMessage);
+            ShowRuntime(counter, wifiConnected, wifiSsid, ipAddress, wifiMessage, string.Empty);
+        }
+
+        /// <summary>
+        /// Shows a compact runtime status block with current station time.
+        /// </summary>
+        public void ShowRuntime(int counter, bool wifiConnected, string wifiSsid, string ipAddress, string wifiMessage, string timeText)
+        {
+            ShowRuntime(counter, wifiConnected, wifiSsid, ipAddress, wifiMessage, string.Empty, timeText);
+        }
+
+        /// <summary>
+        /// Shows a compact runtime status block with current station date and time.
+        /// </summary>
+        public void ShowRuntime(int counter, bool wifiConnected, string wifiSsid, string ipAddress, string wifiMessage, string dateText, string timeText)
+        {
+            DrawStatus(counter, false, wifiConnected, wifiSsid, ipAddress, wifiMessage, dateText, timeText);
         }
 
         private void DrawStatus(int counter, bool provisioningActive, bool wifiConnected, string wifiSsid, string ipAddress, string wifiMessage)
+        {
+            DrawStatus(counter, provisioningActive, wifiConnected, wifiSsid, ipAddress, wifiMessage, string.Empty, string.Empty);
+        }
+
+        private void DrawStatus(int counter, bool provisioningActive, bool wifiConnected, string wifiSsid, string ipAddress, string wifiMessage, string timeText)
+        {
+            DrawStatus(counter, provisioningActive, wifiConnected, wifiSsid, ipAddress, wifiMessage, string.Empty, timeText);
+        }
+
+        private void DrawStatus(int counter, bool provisioningActive, bool wifiConnected, string wifiSsid, string ipAddress, string wifiMessage, string dateText, string timeText)
         {
             if (!_initialized)
             {
@@ -171,7 +199,7 @@ namespace MeteoStanice
                 string modeText = provisioningActive ? "SETUP" : "METEO";
                 string ssidText = WifiSsidLine(wifiSsid, wifiConnected, wifiMessage);
                 string ipText = "IP " + NormalizeDisplayText(ipAddress, 18);
-                DrawStatus(provisioningActive, wifiConnected, modeText, ssidText, ipText, NormalizeDisplayText(wifiMessage, 18));
+                DrawStatus(provisioningActive, wifiConnected, modeText, ssidText, ipText, NormalizeDisplayText(wifiMessage, 18), dateText, timeText);
             }
             catch (Exception exception)
             {
@@ -181,17 +209,33 @@ namespace MeteoStanice
 
         private void DrawStatus(bool provisioningActive, bool wifiConnected, string modeText, string line1, string line2, string line3)
         {
+            DrawStatus(provisioningActive, wifiConnected, modeText, line1, line2, line3, string.Empty, string.Empty);
+        }
+
+        private void DrawStatus(bool provisioningActive, bool wifiConnected, string modeText, string line1, string line2, string line3, string timeText)
+        {
+            DrawStatus(provisioningActive, wifiConnected, modeText, line1, line2, line3, string.Empty, timeText);
+        }
+
+        private void DrawStatus(bool provisioningActive, bool wifiConnected, string modeText, string line1, string line2, string line3, string dateText, string timeText)
+        {
             Color modeColor = provisioningActive ? Color.Orange : Color.LimeGreen;
             Color line1Color = line1 == "WIFI OFF" ? Color.DarkRed : Color.White;
+            string normalizedDateText = NormalizeOptionalDisplayText(dateText, 10);
+            string normalizedTimeText = NormalizeOptionalDisplayText(timeText, 5);
 
             DrawModeIndicatorIfChanged(provisioningActive);
             DrawWifiIndicatorIfChanged(wifiConnected);
-            DrawTextLineIfChanged(12, 14, 96, 18, modeText, _lastModeText, modeColor, 2);
+            DrawTextLineIfChanged(12, 10, 76, 18, modeText, _lastModeText, modeColor, 2);
+            DrawTextLineIfChanged(CenteredX(94, 114, normalizedDateText, 1), 7, 70, 8, normalizedDateText, _lastDateText, Color.White, 1);
+            DrawTextLineIfChanged(CenteredX(94, 114, normalizedTimeText, 1), 18, 42, 8, normalizedTimeText, _lastTimeText, Color.White, 1);
             DrawTextLineIfChanged(12, 42, 180, 10, line1, _lastWifiText, Color.White, 1);
             DrawTextLineIfChanged(12, 62, 180, 10, line2, _lastSsidText, Color.White, 1);
             DrawTextLineIfChanged(12, 82, 180, 10, line3, _lastIpText, Color.White, 1);
 
             _lastModeText = modeText;
+            _lastDateText = normalizedDateText;
+            _lastTimeText = normalizedTimeText;
             _lastWifiText = line1;
             _lastSsidText = line2;
             _lastIpText = line3;
@@ -248,6 +292,8 @@ namespace MeteoStanice
         private void ResetCachedState()
         {
             _lastModeText = null;
+            _lastDateText = null;
+            _lastTimeText = null;
             _lastWifiText = null;
             _lastSsidText = null;
             _lastIpText = null;
@@ -290,6 +336,16 @@ namespace MeteoStanice
             return result.ToString();
         }
 
+        private static string NormalizeOptionalDisplayText(string value, int maxLength)
+        {
+            if (value == null || value.Length == 0)
+            {
+                return string.Empty;
+            }
+
+            return NormalizeDisplayText(value, maxLength);
+        }
+
         private static int MaxTextWidth(string currentText, string previousText, int scale)
         {
             int currentWidth = TextWidth(currentText, scale);
@@ -305,6 +361,17 @@ namespace MeteoStanice
             }
 
             return text.Length * 6 * scale;
+        }
+
+        private static int CenteredX(int areaX, int areaWidth, string text, int scale)
+        {
+            int textWidth = TextWidth(text, scale);
+            if (textWidth >= areaWidth)
+            {
+                return areaX;
+            }
+
+            return areaX + ((areaWidth - textWidth) / 2);
         }
 
         private static string WifiSsidLine(string wifiSsid, bool wifiConnected, string wifiMessage)
@@ -375,7 +442,8 @@ namespace MeteoStanice
                 || character == '.'
                 || character == '-'
                 || character == '_'
-                || character == '|')
+                || character == '|'
+                || character == ':')
             {
                 return character;
             }
@@ -494,6 +562,8 @@ namespace MeteoStanice
                     return GetRow(row, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x1F);
                 case '|':
                     return GetRow(row, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04);
+                case ':':
+                    return GetRow(row, 0x00, 0x0C, 0x0C, 0x00, 0x0C, 0x0C, 0x00);
                 default:
                     return 0x00;
             }

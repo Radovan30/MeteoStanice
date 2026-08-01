@@ -63,10 +63,12 @@ namespace MeteoStanice
             NanoPowerMonitoringService powerService = new NanoPowerMonitoringService(powerMonitor, eventService);
             NanoWifiHardwareDiagnostics wifiHardwareDiagnostics = new NanoWifiHardwareDiagnostics();
             NanoServerStatusService serverStatusService = new NanoServerStatusService(eventService);
+            NanoClockService clockService = new NanoClockService();
             int counter = 0;
 
             eventService.Report(identity.StationId, DeviceEventSeverity.Information, DeviceEventCategory.System, DeviceEventCode.DeviceStarted, "Program", "Firmware started.");
             bool realWifiConnected = ConnectConfiguredWifi(display, wifiHardwareDiagnostics, configuration, 0);
+            clockService.TrySynchronize(realWifiConnected);
             string displayIpAddress = wifiHardwareDiagnostics.GetWirelessIpAddress();
             if (configuration.ApiBaseUrl != null && configuration.ApiBaseUrl.Length > 0)
             {
@@ -116,7 +118,8 @@ namespace MeteoStanice
                 Debug.WriteLine("Uploaded measurements=" + uploadedMeasurements + ", events=" + uploadedEvents);
                 Debug.WriteLine("Event queue after upload=" + eventQueue.Count);
                 displayIpAddress = realWifiConnected ? wifiHardwareDiagnostics.GetWirelessIpAddress() : "0.0.0.0";
-                display.ShowRuntime(counter, realWifiConnected, configuration.WifiSsid, displayIpAddress, realWifiConnected ? string.Empty : wifiHardwareDiagnostics.LastConnectionMessage);
+                clockService.TrySynchronizeIfDue(realWifiConnected);
+                display.ShowRuntime(counter, realWifiConnected, configuration.WifiSsid, displayIpAddress, realWifiConnected ? string.Empty : wifiHardwareDiagnostics.LastConnectionMessage, clockService.GetDisplayDate(), clockService.GetDisplayTime());
 
                 if (buttons.ConsumeSetupRequest())
                 {
@@ -135,6 +138,7 @@ namespace MeteoStanice
                         identity = identityService.CreateIdentity(configuration);
                         Debug.WriteLine("Konfigurace po setupu znovu nactena z flash, SSID=" + (configuration.WifiSsid == string.Empty ? "<nenastaveno>" : configuration.WifiSsid));
                         realWifiConnected = ConnectConfiguredWifi(display, wifiHardwareDiagnostics, configuration, counter);
+                        clockService.TrySynchronize(realWifiConnected);
                     }
                     else
                     {
@@ -142,6 +146,7 @@ namespace MeteoStanice
                         configuration = configurationService.LoadOrCreateDefault();
                         identity = identityService.CreateIdentity(configuration);
                         realWifiConnected = ConnectConfiguredWifi(display, wifiHardwareDiagnostics, configuration, counter);
+                        clockService.TrySynchronize(realWifiConnected);
                     }
 
                     if (provisioningResult.RebootRequired)

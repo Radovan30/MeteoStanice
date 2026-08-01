@@ -33,6 +33,7 @@
     <Compile Include="NanoMeasurementQueue.cs" />
     <Compile Include="NanoMeasurementUpload.cs" />
     <Compile Include="NanoPowerMonitoring.cs" />
+    <Compile Include="NanoClockService.cs" />
     <Compile Include="NanoFrameworkProvisioningPortal.cs" />
     <Compile Include="NanoProvisioning.cs" />
     <Compile Include="NanoProvisioningContracts.cs" />
