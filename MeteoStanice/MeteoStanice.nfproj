@@ -35,6 +35,7 @@
     <Compile Include="NanoFrameworkProvisioningPortal.cs" />
     <Compile Include="NanoProvisioning.cs" />
     <Compile Include="NanoProvisioningContracts.cs" />
+    <Compile Include="NanoServerStatus.cs" />
     <Compile Include="NanoWifiHardwareDiagnostics.cs" />
     <Compile Include="NanoWifiStatus.cs" />
     <Compile Include="Program.cs" />

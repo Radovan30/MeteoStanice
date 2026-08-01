@@ -58,6 +58,8 @@ namespace MeteoStanice
             {
                 _configurationStore.Save(result.Configuration);
                 Debug.WriteLine("Provisioning ulozil novou konfiguraci.");
+                Debug.WriteLine("Provisioning meteo Wi-Fi: " + (result.Configuration.WifiSsid == string.Empty ? "<nenastaveno>" : result.Configuration.WifiSsid));
+                Debug.WriteLine("Provisioning meteo IP: " + (result.Configuration.UseDhcp ? "DHCP" : result.Configuration.StaticIpAddress));
                 return result.Configuration;
             }
 

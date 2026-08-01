@@ -212,6 +212,7 @@ namespace MeteoStanice
                 _result.ConfigurationSaved = true;
                 _result.TimedOut = false;
                 _result.Message = "Konfigurace byla prijata z weboveho nastaveni.";
+                Debug.WriteLine("Provisioning web ulozil SSID: " + (newConfiguration.WifiSsid == string.Empty ? "<nenastaveno>" : newConfiguration.WifiSsid));
                 WriteHtml(response, CreatePage("Nastaveni ulozeno. Stanice prechazi do meteo rezimu."));
                 _running = false;
                 return;
@@ -273,7 +274,58 @@ namespace MeteoStanice
                 return string.Empty;
             }
 
-            return ReplaceAll(value, "+", " ");
+            string decoded = string.Empty;
+            for (int index = 0; index < value.Length; index++)
+            {
+                char character = value[index];
+                if (character == '+')
+                {
+                    decoded += ' ';
+                }
+                else if (character == '%' && index + 2 < value.Length)
+                {
+                    int high = FromHex(value[index + 1]);
+                    int low = FromHex(value[index + 2]);
+                    if (high >= 0 && low >= 0)
+                    {
+                        decoded += (char)((high * 16) + low);
+                        index += 2;
+                    }
+                    else
+                    {
+                        decoded += character;
+                    }
+                }
+                else
+                {
+                    decoded += character;
+                }
+            }
+
+            return decoded;
+        }
+
+        /// <summary>
+        /// Converts one URL-encoded hexadecimal character to its numeric value.
+        /// </summary>
+        private static int FromHex(char value)
+        {
+            if (value >= '0' && value <= '9')
+            {
+                return value - '0';
+            }
+
+            if (value >= 'A' && value <= 'F')
+            {
+                return value - 'A' + 10;
+            }
+
+            if (value >= 'a' && value <= 'f')
+            {
+                return value - 'a' + 10;
+            }
+
+            return -1;
         }
 
         private static void WriteHtml(HttpListenerResponse response, string html)

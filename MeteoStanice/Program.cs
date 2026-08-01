@@ -39,15 +39,20 @@ namespace MeteoStanice
             NanoPowerMonitoringService powerService = new NanoPowerMonitoringService(powerMonitor, eventService);
             NanoWifiService wifiService = new NanoWifiService(eventService);
             NanoWifiHardwareDiagnostics wifiHardwareDiagnostics = new NanoWifiHardwareDiagnostics();
+            NanoServerStatusService serverStatusService = new NanoServerStatusService(eventService);
             int counter = 0;
 
             eventService.Report(identity.StationId, DeviceEventSeverity.Information, DeviceEventCategory.System, DeviceEventCode.DeviceStarted, "Program", "Firmware started.");
             NanoWifiStatus wifiStatus = wifiService.Connect(configuration, identity.StationId);
             Debug.WriteLine("Wi-Fi state=" + wifiStatus.State.ToString() + ", IP=" + wifiStatus.IpAddress);
+            Debug.WriteLine("Real Wi-Fi target SSID=" + (configuration.WifiSsid == string.Empty ? "<nenastaveno>" : configuration.WifiSsid));
             wifiHardwareDiagnostics.PrintAdapterCount();
             wifiHardwareDiagnostics.ScanAndPrintNetworks();
             bool realWifiConnected = wifiHardwareDiagnostics.TryConnect(configuration);
             Debug.WriteLine("Real Wi-Fi connected=" + realWifiConnected);
+            wifiHardwareDiagnostics.PrintAllNetworkInterfaces();
+            NanoServerStatus serverStatus = serverStatusService.Check(configuration, realWifiConnected, identity.StationId);
+            Debug.WriteLine("Server state=" + serverStatus.State.ToString());
 
             // Keep the app alive and produce regular output for the debugger console.
             while (true)
