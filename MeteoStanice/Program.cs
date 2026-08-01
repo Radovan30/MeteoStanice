@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Threading;
+using nanoFramework.Runtime.Native;
 
 namespace MeteoStanice
 {
@@ -17,14 +18,63 @@ namespace MeteoStanice
             StationConfigurationService configurationService = new StationConfigurationService(configurationStore);
             StationConfiguration configuration = configurationService.LoadOrCreateDefault();
             NanoProvisioningService provisioningService = new NanoProvisioningService(configurationStore, configurationService, new NanoFrameworkProvisioningPortal());
-            configuration = provisioningService.RunStartupWindow(configuration);
             StationIdentityService identityService = new StationIdentityService();
             StationIdentity identity = identityService.CreateIdentity(configuration);
+            NanoTtgoDisplay display = new NanoTtgoDisplay();
+            display.Initialize();
+            display.ShowLoading("CONFIG");
+            NanoTtgoButtons buttons = new NanoTtgoButtons();
+            buttons.Initialize();
+            display.ShowLoading("BUTTON");
+
+            bool setupRequestedOnBoot = configuration.ProvisioningRequestedOnNextBoot;
+            if (setupRequestedOnBoot)
+            {
+                Debug.WriteLine("Setup rezim vyzadan z predchoziho behu.");
+            }
+
+            if (setupRequestedOnBoot || buttons.IsHeldAtBoot(BoardProfile.SetupButtonHoldMilliseconds))
+            {
+                Debug.WriteLine("Provisioning bude spusten pri startu.");
+                Debug.WriteLine("Provisioning duvod: flag=" + setupRequestedOnBoot);
+                display.ShowSetup(configuration.ProvisioningAccessPointName, configuration.ProvisioningHostName);
+                configuration.ProvisioningRequestedOnNextBoot = true;
+                configurationStore.Save(configuration);
+                NanoProvisioningResult provisioningResult = provisioningService.RunStartupWindowWithResult(configuration);
+                configuration = provisioningResult.Configuration;
+                if (provisioningResult.RebootRequired)
+                {
+                    Debug.WriteLine("Provisioning vyzaduje dalsi restart pro aktivaci SoftAP.");
+                    display.ShowReboot();
+                    configuration.ProvisioningRequestedOnNextBoot = true;
+                    configurationStore.Save(configuration);
+                    Thread.Sleep(250);
+                    Power.RebootDevice(RebootOption.NormalReboot);
+                }
+
+                configuration.ProvisioningRequestedOnNextBoot = false;
+                configurationStore.Save(configuration);
+                identity = identityService.CreateIdentity(configuration);
+
+                if (provisioningResult.ConfigurationSaved)
+                {
+                    Debug.WriteLine("Provisioning ulozen, stanice se restartuje do meteo rezimu.");
+                    display.ShowReboot();
+                    Thread.Sleep(1500);
+                    Power.RebootDevice(RebootOption.NormalReboot);
+                }
+            }
+            else
+            {
+                Debug.WriteLine("Setup tlacitko nebylo drzene, stanice startuje primo v meteo rezimu.");
+            }
 
             Debug.WriteLine("Board: " + BoardProfile.BoardName);
             Debug.WriteLine("Station: " + identity.StationId + " / " + identity.DeviceHardwareId);
+            Debug.WriteLine("Station GUID: " + identity.StationGuid);
             Debug.WriteLine("Setup SSID: " + configuration.ProvisioningAccessPointName);
             new BootProvisioningWindow().PrintStartupWindow(configuration);
+            display.ShowLoading("SERVICES");
 
             BootSensorSmokeService sensorSmokeService = new BootSensorSmokeService();
             FakeNanoFriendlySensors sensors = new FakeNanoFriendlySensors();
@@ -43,16 +93,22 @@ namespace MeteoStanice
             int counter = 0;
 
             eventService.Report(identity.StationId, DeviceEventSeverity.Information, DeviceEventCategory.System, DeviceEventCode.DeviceStarted, "Program", "Firmware started.");
+            display.ShowLoading("WIFI CFG");
             NanoWifiStatus wifiStatus = wifiService.Connect(configuration, identity.StationId);
             Debug.WriteLine("Wi-Fi state=" + wifiStatus.State.ToString() + ", IP=" + wifiStatus.IpAddress);
             Debug.WriteLine("Real Wi-Fi target SSID=" + (configuration.WifiSsid == string.Empty ? "<nenastaveno>" : configuration.WifiSsid));
             wifiHardwareDiagnostics.PrintAdapterCount();
+            display.ShowLoading("WIFI SCAN");
             wifiHardwareDiagnostics.ScanAndPrintNetworks();
+            display.ShowLoading("WIFI JOIN");
             bool realWifiConnected = wifiHardwareDiagnostics.TryConnect(configuration);
             Debug.WriteLine("Real Wi-Fi connected=" + realWifiConnected);
             wifiHardwareDiagnostics.PrintAllNetworkInterfaces();
+            string displayIpAddress = wifiHardwareDiagnostics.GetWirelessIpAddress();
+            display.ShowLoading("SERVER");
             NanoServerStatus serverStatus = serverStatusService.Check(configuration, realWifiConnected, identity.StationId);
-            Debug.WriteLine("Server state=" + serverStatus.State.ToString());
+            Debug.WriteLine("Server state=" + serverStatus.State.ToString() + ", HTTP=" + serverStatus.HttpStatusCode);
+            uploadClient.ConfigureHttp(configuration.ApiBaseUrl, serverStatus.State == NanoServerConnectionState.Available);
 
             // Keep the app alive and produce regular output for the debugger console.
             while (true)
@@ -87,6 +143,18 @@ namespace MeteoStanice
                 eventUploadService.TryUploadOne();
                 eventUploadService.TryUploadOne();
                 Debug.WriteLine("Event queue after upload=" + eventQueue.Count);
+                displayIpAddress = realWifiConnected ? wifiHardwareDiagnostics.GetWirelessIpAddress() : "0.0.0.0";
+                display.ShowRuntime(counter, realWifiConnected, configuration.WifiSsid, displayIpAddress);
+
+                if (buttons.ConsumeSetupRequest(BoardProfile.SetupButtonHoldMilliseconds))
+                {
+                    Debug.WriteLine("Setup tlacitko podrzeno za behu, setup bude spusten po restartu.");
+                    display.ShowReboot();
+                    configuration.ProvisioningRequestedOnNextBoot = true;
+                    configurationStore.Save(configuration);
+                    Thread.Sleep(250);
+                    Power.RebootDevice(RebootOption.NormalReboot);
+                }
 
                 counter++;
                 Thread.Sleep(1000);

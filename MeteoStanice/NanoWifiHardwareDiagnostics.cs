@@ -82,6 +82,7 @@ namespace MeteoStanice
 
             try
             {
+                Debug.WriteLine("Real Wi-Fi connect target SSID='" + configuration.WifiSsid + "', password length=" + (configuration.WifiPassword == null ? 0 : configuration.WifiPassword.Length));
                 WifiAdapter[] adapters = WifiAdapter.FindAllAdapters();
                 if (adapters == null || adapters.Length == 0)
                 {
@@ -91,14 +92,21 @@ namespace MeteoStanice
 
                 WifiAdapter adapter = adapters[0];
                 adapter.SetDeviceName(configuration.StationName);
-                WifiConnectionResult result = adapter.Connect(configuration.WifiSsid, WifiReconnectionKind.Automatic, configuration.WifiPassword);
-                Debug.WriteLine("Real Wi-Fi connect status: " + result.ConnectionStatus.ToString());
-                if (result.ConnectionStatus != WifiConnectionStatus.Success)
+                ApplyMeteoIpConfiguration(configuration);
+
+                for (int attempt = 1; attempt <= 3; attempt++)
                 {
-                    return false;
+                    WifiConnectionResult result = adapter.Connect(configuration.WifiSsid, WifiReconnectionKind.Automatic, configuration.WifiPassword);
+                    Debug.WriteLine("Real Wi-Fi connect attempt " + attempt + " status: " + result.ConnectionStatus.ToString());
+                    if (result.ConnectionStatus == WifiConnectionStatus.Success && WaitForValidWirelessIp(12000))
+                    {
+                        return true;
+                    }
+
+                    Thread.Sleep(1000);
                 }
 
-                return WaitForValidWirelessIp(10000);
+                return false;
             }
             catch (Exception exception)
             {
@@ -130,6 +138,74 @@ namespace MeteoStanice
             catch (Exception exception)
             {
                 Debug.WriteLine("Network interface diagnostics failed: " + exception.Message);
+            }
+        }
+
+        /// <summary>
+        /// Returns the current IPv4 address from the wireless client interface.
+        /// </summary>
+        public string GetWirelessIpAddress()
+        {
+            try
+            {
+                NetworkInterface wirelessInterface = FindWirelessClientInterface();
+                if (wirelessInterface != null && IsValidIp(wirelessInterface.IPv4Address))
+                {
+                    return wirelessInterface.IPv4Address;
+                }
+            }
+            catch (Exception exception)
+            {
+                Debug.WriteLine("Wireless IP read failed: " + exception.Message);
+            }
+
+            return "0.0.0.0";
+        }
+
+        /// <summary>
+        /// Applies DHCP or static IPv4 settings before connecting in meteo mode.
+        /// </summary>
+        private void ApplyMeteoIpConfiguration(StationConfiguration configuration)
+        {
+            NetworkInterface wirelessInterface = FindWirelessClientInterface();
+            if (wirelessInterface == null)
+            {
+                Debug.WriteLine("Meteo IP config skipped: Wireless80211 interface nenalezeno.");
+                return;
+            }
+
+            try
+            {
+                if (configuration.UseDhcp)
+                {
+                    wirelessInterface.EnableDhcp();
+                    Debug.WriteLine("Meteo IP config: DHCP.");
+                    return;
+                }
+
+                if (!IsValidIp(configuration.StaticIpAddress)
+                    || !IsValidIp(configuration.SubnetMask)
+                    || !IsValidIp(configuration.GatewayAddress))
+                {
+                    Debug.WriteLine("Meteo IP config skipped: staticka IPv4 konfigurace neni kompletni.");
+                    return;
+                }
+
+                wirelessInterface.EnableStaticIPv4(configuration.StaticIpAddress, configuration.SubnetMask, configuration.GatewayAddress);
+                if (IsValidIp(configuration.DnsAddress))
+                {
+                    string[] dnsAddresses = new string[1];
+                    dnsAddresses[0] = configuration.DnsAddress;
+                    wirelessInterface.EnableStaticIPv4Dns(dnsAddresses);
+                }
+
+                Debug.WriteLine("Meteo IP config: static IP=" + configuration.StaticIpAddress
+                    + ", gateway=" + configuration.GatewayAddress
+                    + ", DNS=" + configuration.DnsAddress);
+            }
+            catch (Exception exception)
+            {
+                Debug.WriteLine("Meteo IP config failed: " + exception.Message);
             }
         }
 

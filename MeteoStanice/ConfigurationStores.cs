@@ -114,6 +114,7 @@ namespace MeteoStanice
         private static string Serialize(StationConfiguration configuration)
         {
             return "StationId=" + Escape(configuration.StationId) + "\n"
+                + "StationGuid=" + Escape(configuration.StationGuid) + "\n"
                 + "DeviceHardwareId=" + Escape(configuration.DeviceHardwareId) + "\n"
                 + "StationName=" + Escape(configuration.StationName) + "\n"
                 + "FirmwareVersion=" + Escape(configuration.FirmwareVersion) + "\n"
@@ -128,7 +129,9 @@ namespace MeteoStanice
                 + "ProvisioningAccessPointName=" + Escape(configuration.ProvisioningAccessPointName) + "\n"
                 + "ProvisioningPassword=" + Escape(configuration.ProvisioningPassword) + "\n"
                 + "ProvisioningAddress=" + Escape(configuration.ProvisioningAddress) + "\n"
-                + "ProvisioningWindowMilliseconds=" + configuration.ProvisioningWindowMilliseconds + "\n";
+                + "ProvisioningHostName=" + Escape(configuration.ProvisioningHostName) + "\n"
+                + "ProvisioningWindowMilliseconds=" + configuration.ProvisioningWindowMilliseconds + "\n"
+                + "ProvisioningRequestedOnNextBoot=" + (configuration.ProvisioningRequestedOnNextBoot ? "1" : "0") + "\n";
         }
 
         /// <summary>
@@ -143,6 +146,7 @@ namespace MeteoStanice
 
             StationConfiguration configuration = new StationConfiguration();
             configuration.StationId = GetValue(content, "StationId");
+            configuration.StationGuid = GetValue(content, "StationGuid");
             configuration.DeviceHardwareId = GetValue(content, "DeviceHardwareId");
             configuration.StationName = GetValue(content, "StationName");
             configuration.FirmwareVersion = GetValue(content, "FirmwareVersion");
@@ -157,7 +161,9 @@ namespace MeteoStanice
             configuration.ProvisioningAccessPointName = GetValue(content, "ProvisioningAccessPointName");
             configuration.ProvisioningPassword = GetValue(content, "ProvisioningPassword");
             configuration.ProvisioningAddress = GetValue(content, "ProvisioningAddress");
+            configuration.ProvisioningHostName = GetValue(content, "ProvisioningHostName");
             configuration.ProvisioningWindowMilliseconds = ParseInt(GetValue(content, "ProvisioningWindowMilliseconds"), 30000);
+            configuration.ProvisioningRequestedOnNextBoot = GetValue(content, "ProvisioningRequestedOnNextBoot") == "1";
             return configuration;
         }
 

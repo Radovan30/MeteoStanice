@@ -18,6 +18,8 @@ namespace MeteoStanice
         public StationConfiguration Configuration { get; set; }
         // Short diagnostic message.
         public string Message { get; set; }
+        // True when SoftAP configuration was saved and another reboot is required.
+        public bool RebootRequired { get; set; }
     }
 
     /// <summary>
@@ -52,6 +54,15 @@ namespace MeteoStanice
         /// </summary>
         public StationConfiguration RunStartupWindow(StationConfiguration currentConfiguration)
         {
+            NanoProvisioningResult result = RunStartupWindowWithResult(currentConfiguration);
+            return result.Configuration;
+        }
+
+        /// <summary>
+        /// Runs setup window and returns the complete result for boot orchestration.
+        /// </summary>
+        public NanoProvisioningResult RunStartupWindowWithResult(StationConfiguration currentConfiguration)
+        {
             NanoProvisioningResult result = WaitForResult(currentConfiguration);
 
             if (result.ConfigurationSaved && _configurationService.Validate(result.Configuration))
@@ -60,7 +71,14 @@ namespace MeteoStanice
                 Debug.WriteLine("Provisioning ulozil novou konfiguraci.");
                 Debug.WriteLine("Provisioning meteo Wi-Fi: " + (result.Configuration.WifiSsid == string.Empty ? "<nenastaveno>" : result.Configuration.WifiSsid));
                 Debug.WriteLine("Provisioning meteo IP: " + (result.Configuration.UseDhcp ? "DHCP" : result.Configuration.StaticIpAddress));
-                return result.Configuration;
+                StationConfiguration verifyConfiguration;
+                if (_configurationStore.TryLoad(out verifyConfiguration))
+                {
+                    Debug.WriteLine("Provisioning kontrola flash SSID: " + (verifyConfiguration.WifiSsid == string.Empty ? "<nenastaveno>" : verifyConfiguration.WifiSsid));
+                    Debug.WriteLine("Provisioning kontrola flash heslo delka: " + (verifyConfiguration.WifiPassword == null ? 0 : verifyConfiguration.WifiPassword.Length));
+                }
+
+                return result;
             }
 
             if (result.TimedOut)
@@ -68,7 +86,8 @@ namespace MeteoStanice
                 Debug.WriteLine("Provisioning timeout, stanice pokracuje v meteo rezimu.");
             }
 
-            return currentConfiguration;
+            result.Configuration = currentConfiguration;
+            return result;
         }
 
         /// <summary>
@@ -123,6 +142,7 @@ namespace MeteoStanice
                 {
                     Debug.WriteLine("Provisioning portal nelze spustit, stanice pokracuje v meteo rezimu.");
                     result.TimedOut = true;
+                    result.RebootRequired = true;
                     result.Message = "Setup portal did not start.";
                     return result;
                 }

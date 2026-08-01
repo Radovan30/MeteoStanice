@@ -1,3 +1,4 @@
+using System;
 using System.Diagnostics;
 
 namespace MeteoStanice
@@ -9,6 +10,8 @@ namespace MeteoStanice
     {
         // User-facing station identifier used in the web application.
         public string StationId { get; set; }
+        // Permanent station GUID generated once and stored in flash.
+        public string StationGuid { get; set; }
         // Immutable hardware identifier for the physical board.
         public string DeviceHardwareId { get; set; }
         // Human-friendly station name.
@@ -37,8 +40,12 @@ namespace MeteoStanice
         public string ProvisioningPassword { get; set; }
         // Local web address used by the setup portal.
         public string ProvisioningAddress { get; set; }
+        // Friendly setup host name reserved for local DNS or mDNS.
+        public string ProvisioningHostName { get; set; }
         // Setup window length after boot.
         public int ProvisioningWindowMilliseconds { get; set; }
+        // True when the next boot should enter setup mode before meteo mode.
+        public bool ProvisioningRequestedOnNextBoot { get; set; }
     }
 
     /// <summary>
@@ -48,6 +55,8 @@ namespace MeteoStanice
     {
         // User-facing station identifier.
         public string StationId { get; set; }
+        // Permanent station GUID.
+        public string StationGuid { get; set; }
         // Immutable hardware identifier.
         public string DeviceHardwareId { get; set; }
         // Human-friendly station name.
@@ -89,6 +98,20 @@ namespace MeteoStanice
                     Debug.WriteLine("Provisioning okno aktualizovano na 60000 ms.");
                 }
 
+                if (configuration.ProvisioningHostName == null || configuration.ProvisioningHostName.Length == 0)
+                {
+                    configuration.ProvisioningHostName = "meteo";
+                    _configurationStore.Save(configuration);
+                    Debug.WriteLine("Provisioning alias aktualizovan na http://meteo/.");
+                }
+
+                if (configuration.StationGuid == null || configuration.StationGuid.Length == 0)
+                {
+                    configuration.StationGuid = CreateStationGuid();
+                    _configurationStore.Save(configuration);
+                    Debug.WriteLine("Station GUID vytvoren a ulozen: " + configuration.StationGuid);
+                }
+
                 return configuration;
             }
 
@@ -104,6 +127,7 @@ namespace MeteoStanice
         {
             StationConfiguration configuration = new StationConfiguration();
             configuration.StationId = "METEO-TEST-001";
+            configuration.StationGuid = CreateStationGuid();
             configuration.DeviceHardwareId = BoardProfile.HardwareIdPrefix + "-UNKNOWN";
             configuration.StationName = "XIAO ESP32C3 meteostanice";
             configuration.FirmwareVersion = "0.1.0-test";
@@ -118,7 +142,9 @@ namespace MeteoStanice
             configuration.ProvisioningAccessPointName = BoardProfile.ProvisioningAccessPointName;
             configuration.ProvisioningPassword = "12345678";
             configuration.ProvisioningAddress = "192.168.4.1";
+            configuration.ProvisioningHostName = "meteo";
             configuration.ProvisioningWindowMilliseconds = DefaultProvisioningWindowMilliseconds;
+            configuration.ProvisioningRequestedOnNextBoot = false;
             return configuration;
         }
 
@@ -134,7 +160,16 @@ namespace MeteoStanice
                 && configuration.GatewayAddress != null
                 && configuration.SubnetMask != null
                 && configuration.DnsAddress != null
+                && configuration.ProvisioningAddress != null
                 && configuration.ProvisioningWindowMilliseconds > 0;
+        }
+
+        /// <summary>
+        /// Creates a station GUID suitable for permanent flash storage.
+        /// </summary>
+        private static string CreateStationGuid()
+        {
+            return Guid.NewGuid().ToString();
         }
     }
 
@@ -150,6 +185,7 @@ namespace MeteoStanice
         {
             StationIdentity identity = new StationIdentity();
             identity.StationId = configuration.StationId;
+            identity.StationGuid = configuration.StationGuid;
             identity.DeviceHardwareId = configuration.DeviceHardwareId;
             identity.StationName = configuration.StationName;
             identity.FirmwareVersion = configuration.FirmwareVersion;
@@ -171,6 +207,7 @@ namespace MeteoStanice
             Debug.WriteLine("Setup Wi-Fi SSID: " + configuration.ProvisioningAccessPointName);
             Debug.WriteLine("Setup heslo/PIN: " + configuration.ProvisioningPassword);
             Debug.WriteLine("Setup web: http://" + configuration.ProvisioningAddress + "/");
+            Debug.WriteLine("Setup alias: http://" + configuration.ProvisioningHostName + "/");
             Debug.WriteLine("Meteo Wi-Fi: " + (configuration.WifiSsid == string.Empty ? "<nenastaveno>" : configuration.WifiSsid));
             Debug.WriteLine("Meteo IP: " + (configuration.UseDhcp ? "DHCP" : configuration.StaticIpAddress));
         }
