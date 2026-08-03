@@ -60,6 +60,7 @@ namespace MeteoStanice
         public void Stop()
         {
             _running = false;
+            Thread.Sleep(600);
 
             if (_socket != null)
             {

@@ -126,6 +126,11 @@ namespace MeteoStanice
                 + "SubnetMask=" + Escape(configuration.SubnetMask) + "\n"
                 + "DnsAddress=" + Escape(configuration.DnsAddress) + "\n"
                 + "ApiBaseUrl=" + Escape(configuration.ApiBaseUrl) + "\n"
+                + "MeasurementIntervalMinutes=" + configuration.MeasurementIntervalMinutes + "\n"
+                + "SamplePeriodSeconds=" + configuration.SamplePeriodSeconds + "\n"
+                + "MeasurementUploadsPerCycle=" + configuration.MeasurementUploadsPerCycle + "\n"
+                + "EventUploadsPerCycle=" + configuration.EventUploadsPerCycle + "\n"
+                + "LocationText=" + Escape(configuration.LocationText) + "\n"
                 + "ProvisioningAccessPointName=" + Escape(configuration.ProvisioningAccessPointName) + "\n"
                 + "ProvisioningPassword=" + Escape(configuration.ProvisioningPassword) + "\n"
                 + "ProvisioningAddress=" + Escape(configuration.ProvisioningAddress) + "\n"
@@ -158,6 +163,11 @@ namespace MeteoStanice
             configuration.SubnetMask = GetValue(content, "SubnetMask");
             configuration.DnsAddress = GetValue(content, "DnsAddress");
             configuration.ApiBaseUrl = GetValue(content, "ApiBaseUrl");
+            configuration.MeasurementIntervalMinutes = ParseInt(GetValue(content, "MeasurementIntervalMinutes"), 10);
+            configuration.SamplePeriodSeconds = ParseInt(GetValue(content, "SamplePeriodSeconds"), 1);
+            configuration.MeasurementUploadsPerCycle = ParseInt(GetValue(content, "MeasurementUploadsPerCycle"), 2);
+            configuration.EventUploadsPerCycle = ParseInt(GetValue(content, "EventUploadsPerCycle"), 4);
+            configuration.LocationText = GetValue(content, "LocationText");
             configuration.ProvisioningAccessPointName = GetValue(content, "ProvisioningAccessPointName");
             configuration.ProvisioningPassword = GetValue(content, "ProvisioningPassword");
             configuration.ProvisioningAddress = GetValue(content, "ProvisioningAddress");
@@ -200,14 +210,24 @@ namespace MeteoStanice
         /// </summary>
         private static int ParseInt(string value, int defaultValue)
         {
-            try
-            {
-                return int.Parse(value);
-            }
-            catch
+            if (value == null || value.Length == 0)
             {
                 return defaultValue;
             }
+
+            int parsed = 0;
+            for (int index = 0; index < value.Length; index++)
+            {
+                char character = value[index];
+                if (character < '0' || character > '9')
+                {
+                    return defaultValue;
+                }
+
+                parsed = (parsed * 10) + (character - '0');
+            }
+
+            return parsed;
         }
 
         /// <summary>

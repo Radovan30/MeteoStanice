@@ -59,8 +59,7 @@ namespace MeteoStanice
                 return false;
             }
 
-            _dnsResponder = new NanoDnsResponder();
-            _dnsResponder.Start(configuration.ProvisioningHostName, configuration.ProvisioningAddress);
+            Thread.Sleep(1000);
 
             IPAddress provisioningAddress = IPAddress.Parse(configuration.ProvisioningAddress);
             _dhcpServer = new DhcpServer();
@@ -70,9 +69,11 @@ namespace MeteoStanice
             if (!_dhcpServer.Start(provisioningAddress, IPAddress.Parse(SubnetMask)))
             {
                 Debug.WriteLine("DHCP server pro provisioning se nepodarilo spustit.");
-                _dnsResponder.Stop();
                 return false;
             }
+
+            _dnsResponder = new NanoDnsResponder();
+            _dnsResponder.Start(configuration.ProvisioningHostName, configuration.ProvisioningAddress);
 
             _serverSocket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
             _serverSocket.Bind(new IPEndPoint(IPAddress.Any, 80));
@@ -178,6 +179,7 @@ namespace MeteoStanice
         public void Stop()
         {
             _running = false;
+            Thread.Sleep(600);
 
             if (_serverSocket != null)
             {
@@ -351,7 +353,8 @@ namespace MeteoStanice
                     Debug.WriteLine("Provisioning POST keys: ssid=" + HasValue(values, "ssid")
                         + ", password=" + HasValue(values, "password")
                         + ", api=" + HasValue(values, "api")
-                        + ", dhcp=" + HasValue(values, "dhcp"));
+                        + ", dhcp=" + HasValue(values, "dhcp")
+                        + ", locationText=" + HasValue(values, "locationText"));
                     StationConfiguration newConfiguration = BuildConfiguration(values);
 
                     if (newConfiguration == null)
@@ -519,10 +522,31 @@ namespace MeteoStanice
             configuration.GatewayAddress = GetValue(values, "gateway");
             configuration.SubnetMask = GetValue(values, "mask");
             configuration.DnsAddress = GetValue(values, "dns");
+            configuration.MeasurementIntervalMinutes = ParsePositiveInt(GetValue(values, "measurement"), 10);
+            configuration.SamplePeriodSeconds = ParsePositiveInt(GetValue(values, "sample"), 1);
+            configuration.MeasurementUploadsPerCycle = ParsePositiveInt(GetValue(values, "measurementUploads"), 2);
+            configuration.EventUploadsPerCycle = ParsePositiveInt(GetValue(values, "eventUploads"), 4);
+            configuration.LocationText = GetValue(values, "locationText");
             Debug.WriteLine("Provisioning form SSID length=" + configuration.WifiSsid.Length
                 + ", password length=" + configuration.WifiPassword.Length
-                + ", DHCP=" + configuration.UseDhcp);
+                + ", DHCP=" + configuration.UseDhcp
+                + ", measurement min=" + configuration.MeasurementIntervalMinutes
+                + ", sample s=" + configuration.SamplePeriodSeconds
+                + ", location text=" + configuration.LocationText);
             return configuration;
+        }
+
+        private static int ParsePositiveInt(string value, int defaultValue)
+        {
+            try
+            {
+                int parsed = int.Parse(value);
+                return parsed < 1 ? defaultValue : parsed;
+            }
+            catch
+            {
+                return defaultValue;
+            }
         }
 
         private static Hashtable ParseForm(string raw)
@@ -727,7 +751,7 @@ namespace MeteoStanice
                 + ".row{display:flex;align-items:center;gap:8px;margin-top:10px}.row input{width:auto;margin:0}.btn,a.btn{display:inline-block;margin-top:14px;padding:10px 12px;border-radius:6px;background:#1f8cff;color:white;text-decoration:none;border:0}"
                 + ".msg{margin-top:12px;color:#ffd166}.hint{font-size:12px;color:#90a0b4;margin-top:12px}.current{font-size:12px;color:#cbd6e2;line-height:1.5;margin:10px 0 4px}</style>"
                 + "</head><body><div class=\"wrap\"><h1>MeteoStanice</h1><p class=\"sub\">Nastaveni Wi-Fi a serveru</p><div class=\"box\"><form method=\"post\" action=\"/\">"
-                + "<div class=\"current\">Aktualne: SSID " + HtmlEncode(DisplayValue(_baseConfiguration.WifiSsid)) + "<br>Heslo " + PasswordState(_baseConfiguration.WifiPassword) + "<br>API " + HtmlEncode(DisplayValue(_baseConfiguration.ApiBaseUrl)) + "<br>DHCP " + (_baseConfiguration.UseDhcp ? "zapnuto" : "vypnuto") + "</div>"
+                + "<div class=\"current\">Aktualne: SSID " + HtmlEncode(DisplayValue(_baseConfiguration.WifiSsid)) + "<br>Heslo " + PasswordState(_baseConfiguration.WifiPassword) + "<br>API " + HtmlEncode(DisplayValue(_baseConfiguration.ApiBaseUrl)) + "<br>DHCP " + (_baseConfiguration.UseDhcp ? "zapnuto" : "vypnuto") + "<br>Mereni " + _baseConfiguration.MeasurementIntervalMinutes + " min, vzorek " + _baseConfiguration.SamplePeriodSeconds + " s<br>Lokace " + HtmlEncode(DisplayValue(_baseConfiguration.LocationText)) + "</div>"
                 + "<a class=\"btn\" href=\"/scan\">Vybrat Wi-Fi</a>"
                 + Field("ssid", "Wi-Fi SSID", _baseConfiguration.WifiSsid, "text")
                 + Field("password", "Wi-Fi heslo", _baseConfiguration.WifiPassword, "password")
@@ -737,6 +761,11 @@ namespace MeteoStanice
                 + Field("gateway", "Brana", _baseConfiguration.GatewayAddress, "text")
                 + Field("mask", "Maska", _baseConfiguration.SubnetMask, "text")
                 + Field("dns", "DNS", _baseConfiguration.DnsAddress, "text")
+                + Field("measurement", "Interval mereni v minutach", _baseConfiguration.MeasurementIntervalMinutes.ToString(), "number")
+                + Field("sample", "Perioda vzorku v sekundach", _baseConfiguration.SamplePeriodSeconds.ToString(), "number")
+                + Field("measurementUploads", "Upload mereni na cyklus", _baseConfiguration.MeasurementUploadsPerCycle.ToString(), "number")
+                + Field("eventUploads", "Upload udalosti na cyklus", _baseConfiguration.EventUploadsPerCycle.ToString(), "number")
+                + Field("locationText", "Misto meteostanice", _baseConfiguration.LocationText, "text")
                 + "<button class=\"btn\" type=\"submit\">Ulozit</button></form><p class=\"msg\">" + message + "</p>"
                 + "<p class=\"hint\">Po ulozeni zustane setup zapnuty. Do meteo rezimu se vrat tlacitkem.</p></div></div></body></html>";
         }
@@ -750,7 +779,7 @@ namespace MeteoStanice
                 + ".box{border:1px solid #2d3b4c;border-radius:8px;padding:16px;background:#151d28}.status{font-size:26px;font-weight:bold;color:" + color + ";margin:0 0 8px}"
                 + "p{line-height:1.45}.current{font-size:13px;color:#cbd6e2;line-height:1.6;margin:12px 0}.btn{display:inline-block;margin-top:12px;padding:10px 12px;border-radius:6px;background:#1f8cff;color:white;text-decoration:none}</style>"
                 + "</head><body><div class=\"wrap\"><div class=\"box\"><div class=\"status\">" + title + "</div><p>" + HtmlEncode(message) + "</p>"
-                + "<div class=\"current\">SSID: " + HtmlEncode(DisplayValue(_baseConfiguration.WifiSsid)) + "<br>Heslo: " + PasswordState(_baseConfiguration.WifiPassword) + "<br>API: " + HtmlEncode(DisplayValue(_baseConfiguration.ApiBaseUrl)) + "<br>DHCP: " + (_baseConfiguration.UseDhcp ? "zapnuto" : "vypnuto") + "</div>"
+                + "<div class=\"current\">SSID: " + HtmlEncode(DisplayValue(_baseConfiguration.WifiSsid)) + "<br>Heslo: " + PasswordState(_baseConfiguration.WifiPassword) + "<br>API: " + HtmlEncode(DisplayValue(_baseConfiguration.ApiBaseUrl)) + "<br>DHCP: " + (_baseConfiguration.UseDhcp ? "zapnuto" : "vypnuto") + "<br>Mereni: " + _baseConfiguration.MeasurementIntervalMinutes + " min, vzorek " + _baseConfiguration.SamplePeriodSeconds + " s<br>Lokace: " + HtmlEncode(DisplayValue(_baseConfiguration.LocationText)) + "</div>"
                 + "<a class=\"btn\" href=\"/\">Zpet do nastaveni</a></div></div></body></html>";
         }
 
@@ -926,6 +955,11 @@ namespace MeteoStanice
             configuration.GatewayAddress = source.GatewayAddress;
             configuration.SubnetMask = source.SubnetMask;
             configuration.DnsAddress = source.DnsAddress;
+            configuration.MeasurementIntervalMinutes = source.MeasurementIntervalMinutes;
+            configuration.SamplePeriodSeconds = source.SamplePeriodSeconds;
+            configuration.MeasurementUploadsPerCycle = source.MeasurementUploadsPerCycle;
+            configuration.EventUploadsPerCycle = source.EventUploadsPerCycle;
+            configuration.LocationText = source.LocationText;
             configuration.ProvisioningAccessPointName = source.ProvisioningAccessPointName;
             configuration.ProvisioningPassword = source.ProvisioningPassword;
             configuration.ProvisioningAddress = source.ProvisioningAddress;
@@ -963,8 +997,10 @@ namespace MeteoStanice
 
             bool verified = SameValue(configuration.WifiSsid, verifyConfiguration.WifiSsid)
                 && SameValue(configuration.WifiPassword, verifyConfiguration.WifiPassword)
-                && SameValue(configuration.ApiBaseUrl, verifyConfiguration.ApiBaseUrl);
+                && SameValue(configuration.ApiBaseUrl, verifyConfiguration.ApiBaseUrl)
+                && SameValue(configuration.LocationText, verifyConfiguration.LocationText);
             Debug.WriteLine("Provisioning save verify SSID=" + (verifyConfiguration.WifiSsid == string.Empty ? "<nenastaveno>" : verifyConfiguration.WifiSsid)
+                + ", location=" + (verifyConfiguration.LocationText == string.Empty ? "<nenastaveno>" : verifyConfiguration.LocationText)
                 + ", password length saved=" + (configuration.WifiPassword == null ? 0 : configuration.WifiPassword.Length)
                 + ", loaded=" + (verifyConfiguration.WifiPassword == null ? 0 : verifyConfiguration.WifiPassword.Length)
                 + ", ok=" + verified);

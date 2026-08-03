@@ -196,6 +196,7 @@ namespace MeteoStanice
 
             return escaped.ToString();
         }
+
     }
 
     /// <summary>

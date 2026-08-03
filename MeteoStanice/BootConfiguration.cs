@@ -34,6 +34,16 @@ namespace MeteoStanice
         public string DnsAddress { get; set; }
         // Server API base URL.
         public string ApiBaseUrl { get; set; }
+        // Length of one final measurement interval in minutes.
+        public int MeasurementIntervalMinutes { get; set; }
+        // Delay between individual sensor samples in seconds.
+        public int SamplePeriodSeconds { get; set; }
+        // Maximum measurement records uploaded during one runtime loop.
+        public int MeasurementUploadsPerCycle { get; set; }
+        // Maximum device events uploaded during one runtime loop.
+        public int EventUploadsPerCycle { get; set; }
+        // Human-entered station place name shown on the display.
+        public string LocationText { get; set; }
         // Name of the temporary setup access point.
         public string ProvisioningAccessPointName { get; set; }
         // Password for the temporary setup access point and setup form.
@@ -112,6 +122,13 @@ namespace MeteoStanice
                     Debug.WriteLine("Station GUID vytvoren a ulozen: " + configuration.StationGuid);
                 }
 
+                bool upgraded = EnsureRuntimeDefaults(configuration);
+                if (upgraded)
+                {
+                    _configurationStore.Save(configuration);
+                    Debug.WriteLine("Runtime nastaveni doplneno do konfigurace.");
+                }
+
                 return configuration;
             }
 
@@ -139,6 +156,11 @@ namespace MeteoStanice
             configuration.SubnetMask = "255.255.255.0";
             configuration.DnsAddress = "8.8.8.8";
             configuration.ApiBaseUrl = string.Empty;
+            configuration.MeasurementIntervalMinutes = 10;
+            configuration.SamplePeriodSeconds = 1;
+            configuration.MeasurementUploadsPerCycle = 2;
+            configuration.EventUploadsPerCycle = 4;
+            configuration.LocationText = string.Empty;
             configuration.ProvisioningAccessPointName = BoardProfile.ProvisioningAccessPointName;
             configuration.ProvisioningPassword = "12345678";
             configuration.ProvisioningAddress = "192.168.4.1";
@@ -157,6 +179,43 @@ namespace MeteoStanice
                 && configuration.StationId != null
                 && configuration.DeviceHardwareId != null
                 && configuration.ProvisioningWindowMilliseconds > 0;
+        }
+
+        private static bool EnsureRuntimeDefaults(StationConfiguration configuration)
+        {
+            bool changed = false;
+
+            if (configuration.MeasurementIntervalMinutes < 1)
+            {
+                configuration.MeasurementIntervalMinutes = 10;
+                changed = true;
+            }
+
+            if (configuration.SamplePeriodSeconds < 1)
+            {
+                configuration.SamplePeriodSeconds = 1;
+                changed = true;
+            }
+
+            if (configuration.MeasurementUploadsPerCycle < 1)
+            {
+                configuration.MeasurementUploadsPerCycle = 2;
+                changed = true;
+            }
+
+            if (configuration.EventUploadsPerCycle < 1)
+            {
+                configuration.EventUploadsPerCycle = 4;
+                changed = true;
+            }
+
+            if (configuration.LocationText == null)
+            {
+                configuration.LocationText = string.Empty;
+                changed = true;
+            }
+
+            return changed;
         }
 
         /// <summary>
@@ -205,6 +264,9 @@ namespace MeteoStanice
             Debug.WriteLine("Setup alias: http://" + configuration.ProvisioningHostName + "/");
             Debug.WriteLine("Meteo Wi-Fi: " + (configuration.WifiSsid == string.Empty ? "<nenastaveno>" : configuration.WifiSsid));
             Debug.WriteLine("Meteo IP: " + (configuration.UseDhcp ? "DHCP" : configuration.StaticIpAddress));
+            Debug.WriteLine("Mereni interval: " + configuration.MeasurementIntervalMinutes + " min.");
+            Debug.WriteLine("Vzorkovani: " + configuration.SamplePeriodSeconds + " s.");
+            Debug.WriteLine("Lokace: " + (configuration.LocationText == null || configuration.LocationText.Length == 0 ? "<nenastaveno>" : configuration.LocationText));
         }
     }
 }

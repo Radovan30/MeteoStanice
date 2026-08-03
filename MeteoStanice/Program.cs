@@ -9,9 +9,6 @@ namespace MeteoStanice
     /// </summary>
     public class Program
     {
-        private const int RuntimeLoopDelayMilliseconds = 1000;
-        private const int MeasurementUploadsPerCycle = 2;
-        private const int EventUploadsPerCycle = 4;
         private const int SetupButtonTransitionBlockMilliseconds = 1500;
 
         /// <summary>
@@ -50,16 +47,16 @@ namespace MeteoStanice
             new BootProvisioningWindow().PrintStartupWindow(configuration);
             display.ShowLoading("SERVICES");
 
-            BootSensorSmokeService sensorSmokeService = new BootSensorSmokeService();
             FakeNanoFriendlySensors sensors = new FakeNanoFriendlySensors();
-            NanoMeasurementBuilder measurementBuilder = new NanoMeasurementBuilder();
+            NanoSensorReader sensorReader = new NanoSensorReader(sensors);
+            NanoMeasurementCycle measurementCycle = new NanoMeasurementCycle(sensorReader);
             NanoMeasurementQueue measurementQueue = new NanoMeasurementQueue(8);
             NanoDeviceEventQueue eventQueue = new NanoDeviceEventQueue(8);
             NanoDeviceEventService eventService = new NanoDeviceEventService(eventQueue);
             NanoUploadClient uploadClient = new NanoUploadClient();
             NanoMeasurementUploadService uploadService = new NanoMeasurementUploadService(measurementQueue, uploadClient);
             NanoDeviceEventUploadService eventUploadService = new NanoDeviceEventUploadService(eventQueue, uploadClient);
-            FakeNanoPowerMonitor powerMonitor = new FakeNanoPowerMonitor();
+            NanoPowerMonitor powerMonitor = new NanoPowerMonitor();
             NanoPowerMonitoringService powerService = new NanoPowerMonitoringService(powerMonitor, eventService);
             NanoWifiHardwareDiagnostics wifiHardwareDiagnostics = new NanoWifiHardwareDiagnostics();
             NanoServerStatusService serverStatusService = new NanoServerStatusService(eventService);
@@ -83,43 +80,37 @@ namespace MeteoStanice
             }
 
             uploadClient.ConfigureHttp(configuration.ApiBaseUrl, serverStatus.State == NanoServerConnectionState.Available);
+            PrintRuntimeValues(configuration, measurementQueue, eventQueue);
 
-            // Keep the app alive and produce regular output for the debugger console.
+            // Keep the app alive and run one configured meteo sample step per loop.
             while (true)
             {
-                BootSensorReadResult result = sensorSmokeService.Read();
-                Debug.WriteLine("Hello world from XIAO ESP32C3 / nanoFramework: " + counter);
-                if (result.IsSuccess)
-                {
-                    BootSensorSample sample = result.Value;
-                    Debug.WriteLine("Smoke sample T=" + sample.TemperatureCelsius + " C, RH=" + sample.RelativeHumidityPercent + " %");
-                }
-                else
-                {
-                    Debug.WriteLine("Smoke sample failed: " + result.ErrorCode.ToString() + " " + result.ErrorMessage);
-                }
-
-                Sht40ReadResult sht40 = sensors.ReadSht40();
-                Bmp280ReadResult bmp280 = sensors.ReadBmp280();
-                Sps30ReadResult sps30 = sensors.ReadSps30();
-                Debug.WriteLine("SHT40 T=" + sht40.Value.TemperatureCelsius + " C, RH=" + sht40.Value.RelativeHumidityPercent + " %");
-                Debug.WriteLine("BMP280 P=" + bmp280.Value.PressureHpa + " hPa");
-                Debug.WriteLine("SPS30 PM2.5=" + sps30.Value.MassPm25 + " ug/m3, PM10=" + sps30.Value.MassPm10 + " ug/m3");
-
-                NanoMeasurementRecord record = measurementBuilder.Build(identity.StationId, sht40, bmp280, sps30);
-                measurementQueue.Enqueue(record);
-                Debug.WriteLine("Record #" + record.SequenceNumber + " values=" + record.ValidValueCount + ", failed=" + record.FailedReadCount + ", status=" + record.Status.ToString());
-                Debug.WriteLine("Queue count=" + measurementQueue.Count + "/" + measurementQueue.Capacity);
-                int uploadedMeasurements = uploadService.TryUploadPending(MeasurementUploadsPerCycle);
-                Debug.WriteLine("Queue after upload=" + measurementQueue.Count + "/" + measurementQueue.Capacity);
                 NanoPowerState powerState = powerService.ReadAndReport(identity.StationId);
-                Debug.WriteLine("Power mains=" + powerState.MainsAvailable + ", battery=" + powerState.BatteryActive + ", voltage=" + powerState.BatteryVoltage);
-                int uploadedEvents = eventUploadService.TryUploadPending(EventUploadsPerCycle);
-                Debug.WriteLine("Uploaded measurements=" + uploadedMeasurements + ", events=" + uploadedEvents);
-                Debug.WriteLine("Event queue after upload=" + eventQueue.Count);
+                NanoMeasurementRecord record;
+                if (measurementCycle.TryRunMeasurementStep(configuration, identity.StationId, powerState, out record))
+                {
+                    Debug.WriteLine("Power mains=" + powerState.MainsAvailable + ", battery=" + powerState.BatteryActive + ", voltage=" + powerState.BatteryVoltage);
+                    if (measurementQueue.Enqueue(record))
+                    {
+                        Debug.WriteLine("Finalni MeasurementRecord #" + record.SequenceNumber + " ulozen do fronty, values=" + record.ValidValueCount + ", failed=" + record.FailedReadCount + ", status=" + record.Status.ToString());
+                    }
+                    else
+                    {
+                        Debug.WriteLine("Fronta mereni je plna, MeasurementRecord #" + record.SequenceNumber + " nelze ulozit.");
+                        eventService.Report(identity.StationId, DeviceEventSeverity.Critical, DeviceEventCategory.Storage, DeviceEventCode.LocalQueueFull, "MeasurementQueue", "Lokalni fronta mereni je plna.");
+                    }
+                }
+
+                int uploadedMeasurements = uploadService.TryUploadPending(configuration.MeasurementUploadsPerCycle);
+                int uploadedEvents = eventUploadService.TryUploadPending(configuration.EventUploadsPerCycle);
+                if (uploadedMeasurements > 0 || uploadedEvents > 0)
+                {
+                    Debug.WriteLine("Uploaded measurements=" + uploadedMeasurements + ", events=" + uploadedEvents);
+                    Debug.WriteLine("Queues after upload: measurements=" + measurementQueue.Count + "/" + measurementQueue.Capacity + ", events=" + eventQueue.Count + "/" + eventQueue.Capacity);
+                }
                 displayIpAddress = realWifiConnected ? wifiHardwareDiagnostics.GetWirelessIpAddress() : "0.0.0.0";
                 clockService.TrySynchronizeIfDue(realWifiConnected);
-                display.ShowRuntime(counter, realWifiConnected, configuration.WifiSsid, displayIpAddress, realWifiConnected ? string.Empty : wifiHardwareDiagnostics.LastConnectionMessage, clockService.GetDisplayDate(), clockService.GetDisplayTime());
+                display.ShowRuntime(counter, realWifiConnected, configuration.WifiSsid, displayIpAddress, realWifiConnected ? string.Empty : wifiHardwareDiagnostics.LastConnectionMessage, clockService.GetDisplayDate(), clockService.GetDisplayTime(), GetLocationDisplayText(configuration), powerState.BatteryActive, powerState.BatteryVoltage, powerState.HasBatteryVoltage);
 
                 if (buttons.ConsumeSetupRequest())
                 {
@@ -136,17 +127,25 @@ namespace MeteoStanice
                     {
                         configuration = configurationService.LoadOrCreateDefault();
                         identity = identityService.CreateIdentity(configuration);
+                        measurementCycle = new NanoMeasurementCycle(sensorReader);
+                        PrintRuntimeValues(configuration, measurementQueue, eventQueue);
                         Debug.WriteLine("Konfigurace po setupu znovu nactena z flash, SSID=" + (configuration.WifiSsid == string.Empty ? "<nenastaveno>" : configuration.WifiSsid));
                         realWifiConnected = ConnectConfiguredWifi(display, wifiHardwareDiagnostics, configuration, counter);
                         clockService.TrySynchronize(realWifiConnected);
+                        serverStatus = serverStatusService.Check(configuration, realWifiConnected, identity.StationId);
+                        uploadClient.ConfigureHttp(configuration.ApiBaseUrl, serverStatus.State == NanoServerConnectionState.Available);
                     }
                     else
                     {
                         Debug.WriteLine("Setup skoncil bez nove ulozene konfigurace, znovu pripojuji stavajici Wi-Fi.");
                         configuration = configurationService.LoadOrCreateDefault();
                         identity = identityService.CreateIdentity(configuration);
+                        measurementCycle = new NanoMeasurementCycle(sensorReader);
+                        PrintRuntimeValues(configuration, measurementQueue, eventQueue);
                         realWifiConnected = ConnectConfiguredWifi(display, wifiHardwareDiagnostics, configuration, counter);
                         clockService.TrySynchronize(realWifiConnected);
+                        serverStatus = serverStatusService.Check(configuration, realWifiConnected, identity.StationId);
+                        uploadClient.ConfigureHttp(configuration.ApiBaseUrl, serverStatus.State == NanoServerConnectionState.Available);
                     }
 
                     if (provisioningResult.RebootRequired)
@@ -169,8 +168,43 @@ namespace MeteoStanice
                 }
 
                 counter++;
-                Thread.Sleep(RuntimeLoopDelayMilliseconds);
+                Thread.Sleep(GetRuntimeLoopDelayMilliseconds(configuration));
             }
+        }
+
+        private static int GetRuntimeLoopDelayMilliseconds(StationConfiguration configuration)
+        {
+            int sampleSeconds = configuration.SamplePeriodSeconds < 1 ? 1 : configuration.SamplePeriodSeconds;
+            return sampleSeconds * 1000;
+        }
+
+        private static void PrintRuntimeValues(StationConfiguration configuration, NanoMeasurementQueue measurementQueue, NanoDeviceEventQueue eventQueue)
+        {
+            Debug.WriteLine("Aktualni hodnoty nastaveni:");
+            Debug.WriteLine("  Stanice ID: " + configuration.StationId);
+            Debug.WriteLine("  GUID: " + configuration.StationGuid);
+            Debug.WriteLine("  Nazev: " + configuration.StationName);
+            Debug.WriteLine("  Misto: " + (configuration.LocationText == null || configuration.LocationText.Length == 0 ? "<nenastaveno>" : configuration.LocationText));
+            Debug.WriteLine("  Wi-Fi SSID: " + (configuration.WifiSsid == null || configuration.WifiSsid.Length == 0 ? "<nenastaveno>" : configuration.WifiSsid));
+            Debug.WriteLine("  IP rezim: " + (configuration.UseDhcp ? "DHCP" : configuration.StaticIpAddress));
+            Debug.WriteLine("  API URL: " + (configuration.ApiBaseUrl == null || configuration.ApiBaseUrl.Length == 0 ? "<nenastaveno>" : configuration.ApiBaseUrl));
+            Debug.WriteLine("  Interval mereni: " + configuration.MeasurementIntervalMinutes + " min.");
+            Debug.WriteLine("  Perioda vzorku: " + configuration.SamplePeriodSeconds + " s.");
+            Debug.WriteLine("  Ocekavane vzorky v intervalu: " + NanoMeasurementCycle.GetExpectedSamples(configuration));
+            Debug.WriteLine("  Upload mereni/cyklus: " + configuration.MeasurementUploadsPerCycle);
+            Debug.WriteLine("  Upload udalosti/cyklus: " + configuration.EventUploadsPerCycle);
+            Debug.WriteLine("  Fronta mereni: " + measurementQueue.Count + "/" + measurementQueue.Capacity);
+            Debug.WriteLine("  Fronta udalosti: " + eventQueue.Count + "/" + eventQueue.Capacity);
+        }
+
+        private static string GetLocationDisplayText(StationConfiguration configuration)
+        {
+            if (configuration.LocationText == null || configuration.LocationText.Length == 0)
+            {
+                return "-";
+            }
+
+            return configuration.LocationText;
         }
 
         private static bool ConnectConfiguredWifi(NanoTtgoDisplay display, NanoWifiHardwareDiagnostics wifiHardwareDiagnostics, StationConfiguration configuration, int counter)

@@ -53,6 +53,15 @@ namespace MeteoStanice
             }
         }
 
+        // Maximum number of events that fit in the queue.
+        public int Capacity
+        {
+            get
+            {
+                return _capacity;
+            }
+        }
+
         /// <summary>
         /// Adds one event when there is free capacity.
         /// </summary>

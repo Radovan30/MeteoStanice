@@ -33,6 +33,10 @@ namespace MeteoStanice
         public const int DisplayResetPin = 23;
         // TTGO T-Display backlight pin.
         public const int DisplayBackLightPin = 4;
+        // TTGO T-Display battery voltage ADC input.
+        public const int BatteryVoltageAdcPin = 34;
+        // TTGO T-Display battery ADC power control pin.
+        public const int BatteryAdcPowerPin = 14;
         // TTGO T-Display right setup button pin.
         public const int SetupButtonPin = 35;
         // TTGO T-Display native portrait screen width.
