@@ -1,0 +1,37 @@
+services:
+  postgres:
+    image: postgres:17
+    container_name: meteostanice-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: meteostanice
+      POSTGRES_USER: meteo
+      POSTGRES_PASSWORD: meteo
+    ports:
+      - "5432:5432"
+    volumes:
+      - meteostanice-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U meteo -d meteostanice"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: .
+      dockerfile: MeteoStanice.Api/Dockerfile
+    container_name: meteostanice-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ASPNETCORE_URLS: http://+:8080
+      ConnectionStrings__MeteoDatabase: Host=postgres;Port=5432;Database=meteostanice;Username=meteo;Password=meteo
+    ports:
+      - "5080:8080"
+
+volumes:
+  meteostanice-postgres-data:

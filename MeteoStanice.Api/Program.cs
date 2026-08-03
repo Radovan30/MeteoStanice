@@ -1,25 +1,45 @@
+using MeteoStanice.Api.Hubs;
+using MeteoStanice.Data;
+using MeteoStanice.Quality;
+using Microsoft.EntityFrameworkCore;
+
 var builder = WebApplication.CreateBuilder(args);
 
-// Add services to the container.
+string connectionString = builder.Configuration.GetConnectionString("MeteoDatabase")
+    ?? throw new InvalidOperationException("Connection string 'MeteoDatabase' is not configured.");
 
+builder.Services.AddDbContext<MeteoDbContext>(options =>
+    options.UseNpgsql(connectionString));
+builder.Services.AddScoped<MeasurementQualityService>();
 builder.Services.AddControllers();
-// Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
+builder.Services.AddSignalR();
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("Dashboard", policy =>
+    {
+        policy
+            .AllowAnyHeader()
+            .AllowAnyMethod()
+            .AllowCredentials()
+            .SetIsOriginAllowed(_ => true);
+    });
+});
 
 var app = builder.Build();
 
-// Configure the HTTP request pipeline.
-if (app.Environment.IsDevelopment())
+app.UseSwagger();
+app.UseSwaggerUI(options =>
 {
-    app.UseSwagger();
-    app.UseSwaggerUI();
-}
+    options.RoutePrefix = "swagger";
+    options.SwaggerEndpoint("/swagger/v1/swagger.json", "MeteoStanice API v1");
+});
 
-app.UseHttpsRedirection();
-
+app.UseCors("Dashboard");
 app.UseAuthorization();
-
+app.MapGet("/", () => Results.Redirect("/swagger")).ExcludeFromDescription();
 app.MapControllers();
+app.MapHub<MeteoHub>("/hubs/meteo");
 
 app.Run();
