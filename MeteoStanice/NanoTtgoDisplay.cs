@@ -27,6 +27,7 @@ namespace MeteoStanice
         private string _lastIpText;
         private string _lastLocationText;
         private string _lastPowerText;
+        private string _lastSensorStatusText;
         private bool _lastProvisioningActive;
         private bool _lastWifiConnected;
         private bool _modeIndicatorDrawn;
@@ -203,6 +204,37 @@ namespace MeteoStanice
             DrawStatus(counter, false, wifiConnected, wifiSsid, ipAddress, wifiMessage, dateText, timeText, locationText, batteryActive, batteryVoltage, hasBatteryVoltage);
         }
 
+        /// <summary>
+        /// Shows the latest sensor health summary as colored indicators.
+        /// </summary>
+        public void ShowSensorStatus(NanoSensorReadSet readSet)
+        {
+            if (!_initialized || readSet == null)
+            {
+                return;
+            }
+
+            try
+            {
+                string statusText = SensorStatusText(readSet);
+                if (statusText == _lastSensorStatusText)
+                {
+                    return;
+                }
+
+                FillLandscapeBlock(12, 120, 210, 12, Color.Black);
+                DrawSensorIndicator(12, 121, "SHT", SensorColor(readSet.Sht40));
+                DrawSensorIndicator(70, 121, "BMP", SensorColor(readSet.Bmp280));
+                DrawSensorIndicator(128, 121, "SPS", SensorColor(readSet.Sps30));
+                FlushLandscapeBlock(12, 120, 210, 12);
+                _lastSensorStatusText = statusText;
+            }
+            catch (Exception exception)
+            {
+                Debug.WriteLine("TTGO display sensor status selhal: " + exception.Message);
+            }
+        }
+
         private void DrawStatus(int counter, bool provisioningActive, bool wifiConnected, string wifiSsid, string ipAddress, string wifiMessage)
         {
             DrawStatus(counter, provisioningActive, wifiConnected, wifiSsid, ipAddress, wifiMessage, string.Empty, string.Empty, string.Empty, false, 0, false);
@@ -341,10 +373,72 @@ namespace MeteoStanice
             _lastIpText = null;
             _lastLocationText = null;
             _lastPowerText = null;
+            _lastSensorStatusText = null;
             _lastProvisioningActive = false;
             _lastWifiConnected = false;
             _modeIndicatorDrawn = false;
             _wifiIndicatorDrawn = false;
+        }
+
+        private void DrawSensorIndicator(int x, int y, string label, Color color)
+        {
+            DrawLandscapeText(x, y, label, Color.White, 1);
+            FillLandscapeBlock(x + 24, y + 1, 8, 8, color);
+        }
+
+        private static string SensorStatusText(NanoSensorReadSet readSet)
+        {
+            return SensorState(readSet.Sht40) + "|" + SensorState(readSet.Bmp280) + "|" + SensorState(readSet.Sps30);
+        }
+
+        private static string SensorState(Sht40ReadResult result)
+        {
+            return result != null && result.IsSuccess ? "OK" : result == null ? "--" : "ERR";
+        }
+
+        private static string SensorState(Bmp280ReadResult result)
+        {
+            return result != null && result.IsSuccess ? "OK" : result == null ? "--" : "ERR";
+        }
+
+        private static string SensorState(Sps30ReadResult result)
+        {
+            if (result == null)
+            {
+                return "--";
+            }
+
+            if (result.IsSuccess)
+            {
+                return "OK";
+            }
+
+            return result.ErrorCode == SensorErrorCode.DisabledOnBattery ? "BAT" : result.ErrorCode == SensorErrorCode.Timeout ? "WAIT" : "ERR";
+        }
+
+        private static Color SensorColor(Sht40ReadResult result)
+        {
+            return result == null ? Color.Orange : result.IsSuccess ? Color.LimeGreen : Color.DarkRed;
+        }
+
+        private static Color SensorColor(Bmp280ReadResult result)
+        {
+            return result == null ? Color.Orange : result.IsSuccess ? Color.LimeGreen : Color.DarkRed;
+        }
+
+        private static Color SensorColor(Sps30ReadResult result)
+        {
+            if (result == null)
+            {
+                return Color.Orange;
+            }
+
+            if (result.IsSuccess)
+            {
+                return Color.LimeGreen;
+            }
+
+            return result.ErrorCode == SensorErrorCode.DisabledOnBattery || result.ErrorCode == SensorErrorCode.Timeout ? Color.Orange : Color.DarkRed;
         }
 
         private void DrawLandscapeFilledCircle(int centerX, int centerY, int radius, Color color)

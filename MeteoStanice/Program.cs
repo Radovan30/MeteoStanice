@@ -47,7 +47,7 @@ namespace MeteoStanice
             new BootProvisioningWindow().PrintStartupWindow(configuration);
             display.ShowLoading("SERVICES");
 
-            FakeNanoFriendlySensors sensors = new FakeNanoFriendlySensors();
+            INanoFriendlySensors sensors = new NanoRealSensorProvider();
             NanoSensorReader sensorReader = new NanoSensorReader(sensors);
             NanoMeasurementCycle measurementCycle = new NanoMeasurementCycle(sensorReader);
             NanoMeasurementQueue measurementQueue = new NanoMeasurementQueue(8);
@@ -100,6 +100,7 @@ namespace MeteoStanice
                         eventService.Report(identity.StationId, DeviceEventSeverity.Critical, DeviceEventCategory.Storage, DeviceEventCode.LocalQueueFull, "MeasurementQueue", "Lokalni fronta mereni je plna.");
                     }
                 }
+                display.ShowSensorStatus(measurementCycle.LastReadSet);
 
                 int uploadedMeasurements = uploadService.TryUploadPending(configuration.MeasurementUploadsPerCycle);
                 int uploadedEvents = eventUploadService.TryUploadPending(configuration.EventUploadsPerCycle);

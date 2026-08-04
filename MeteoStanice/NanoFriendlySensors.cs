@@ -3,6 +3,27 @@ using System;
 namespace MeteoStanice
 {
     /// <summary>
+    /// Reads nano-safe sensor results from the active sensor provider.
+    /// </summary>
+    public interface INanoFriendlySensors
+    {
+        /// <summary>
+        /// Reads one SHT40 sample.
+        /// </summary>
+        Sht40ReadResult ReadSht40();
+
+        /// <summary>
+        /// Reads one BMP280 sample.
+        /// </summary>
+        Bmp280ReadResult ReadBmp280();
+
+        /// <summary>
+        /// Reads one SPS30 sample.
+        /// </summary>
+        Sps30ReadResult ReadSps30();
+    }
+
+    /// <summary>
     /// Represents one temperature and humidity reading from SHT40.
     /// </summary>
     public sealed class Sht40Sample
@@ -35,10 +56,24 @@ namespace MeteoStanice
     /// </summary>
     public sealed class Sps30Sample
     {
+        // PM1.0 mass concentration.
+        public double MassPm1 { get; set; }
         // PM2.5 mass concentration.
         public double MassPm25 { get; set; }
+        // PM4.0 mass concentration.
+        public double MassPm4 { get; set; }
         // PM10 mass concentration.
         public double MassPm10 { get; set; }
+        // Number concentration for particles larger than 0.5 um.
+        public double NumberPm05 { get; set; }
+        // Number concentration for particles larger than 1.0 um.
+        public double NumberPm1 { get; set; }
+        // Number concentration for particles larger than 2.5 um.
+        public double NumberPm25 { get; set; }
+        // Number concentration for particles larger than 4.0 um.
+        public double NumberPm4 { get; set; }
+        // Number concentration for particles larger than 10 um.
+        public double NumberPm10 { get; set; }
         // Typical particle size reported by SPS30.
         public double TypicalParticleSize { get; set; }
         // Timestamp assigned when the sample was captured.
@@ -93,7 +128,7 @@ namespace MeteoStanice
     /// <summary>
     /// Provides deterministic fake sensor readings for layered firmware restore.
     /// </summary>
-    public sealed class FakeNanoFriendlySensors
+    public sealed class FakeNanoFriendlySensors : INanoFriendlySensors
     {
         private int _sequence;
 
@@ -143,8 +178,15 @@ namespace MeteoStanice
         {
             DateTime now = NextTimestamp();
             Sps30Sample sample = new Sps30Sample();
+            sample.MassPm1 = 2.0;
             sample.MassPm25 = 4.5;
+            sample.MassPm4 = 5.1;
             sample.MassPm10 = 6.0;
+            sample.NumberPm05 = 8.0;
+            sample.NumberPm1 = 5.0;
+            sample.NumberPm25 = 3.0;
+            sample.NumberPm4 = 1.0;
+            sample.NumberPm10 = 0.2;
             sample.TypicalParticleSize = 0.6;
             sample.SampledAt = now;
 

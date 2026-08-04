@@ -23,12 +23,12 @@ namespace MeteoStanice
     /// </summary>
     public sealed class NanoSensorReader
     {
-        private readonly FakeNanoFriendlySensors _sensors;
+        private readonly INanoFriendlySensors _sensors;
 
         /// <summary>
         /// Creates a sensor reader over the currently available nano-safe sensor provider.
         /// </summary>
-        public NanoSensorReader(FakeNanoFriendlySensors sensors)
+        public NanoSensorReader(INanoFriendlySensors sensors)
         {
             _sensors = sensors;
         }
@@ -103,6 +103,7 @@ namespace MeteoStanice
         private int _pm10Count;
         private MeasurementStatus _status;
         private DateTime _intervalStartedAt;
+        private NanoSensorReadSet _lastReadSet;
 
         /// <summary>
         /// Creates a measurement cycle over the configured sensor reader.
@@ -122,6 +123,15 @@ namespace MeteoStanice
             }
         }
 
+        // Last raw sensor read set captured by the current cycle.
+        public NanoSensorReadSet LastReadSet
+        {
+            get
+            {
+                return _lastReadSet;
+            }
+        }
+
         /// <summary>
         /// Reads one sample, updates aggregation and returns a final record when the interval is complete.
         /// </summary>
@@ -129,11 +139,13 @@ namespace MeteoStanice
         {
             bool batteryActive = powerState != null && powerState.BatteryActive;
             NanoSensorReadSet sample = _sensorReader.ReadCurrentSample(batteryActive);
+            _lastReadSet = sample;
             AddSample(sample, powerState);
             int expectedSamples = GetExpectedSamples(configuration);
             if (ShouldLogSampleProgress(_sampleCount, expectedSamples))
             {
                 Debug.WriteLine("Vzorek " + _sampleCount + "/" + expectedSamples + ": SHT40=" + State(sample.Sht40) + ", BMP280=" + State(sample.Bmp280) + ", SPS30=" + State(sample.Sps30));
+                Debug.WriteLine("Sensor values: " + Values(sample));
             }
 
             if (_sampleCount < expectedSamples)
@@ -211,6 +223,11 @@ namespace MeteoStanice
                 _pm10Sum += result.Value.MassPm10;
                 _pm10Count++;
                 _validValueCount += 2;
+                return;
+            }
+
+            if (result != null && result.ErrorCode == SensorErrorCode.Timeout)
+            {
                 return;
             }
 
@@ -315,7 +332,50 @@ namespace MeteoStanice
 
         private static string State(Sps30ReadResult result)
         {
-            return result != null && result.IsSuccess ? "OK" : result != null && result.ErrorCode == SensorErrorCode.DisabledOnBattery ? "BAT" : "ERR";
+            return result != null && result.IsSuccess ? "OK" : result != null && result.ErrorCode == SensorErrorCode.DisabledOnBattery ? "BAT" : result != null && result.ErrorCode == SensorErrorCode.Timeout ? "WAIT" : "ERR";
+        }
+
+        private static string Values(NanoSensorReadSet sample)
+        {
+            string sht40 = sample.Sht40 != null && sample.Sht40.IsSuccess && sample.Sht40.Value != null
+                ? "SHT40 T=" + sample.Sht40.Value.TemperatureCelsius + " C, RH=" + sample.Sht40.Value.RelativeHumidityPercent + " %"
+                : "SHT40 " + Error(sample.Sht40);
+            string bmp280 = sample.Bmp280 != null && sample.Bmp280.IsSuccess && sample.Bmp280.Value != null
+                ? "BMP280 P=" + sample.Bmp280.Value.PressureHpa + " hPa, Taux=" + sample.Bmp280.Value.AuxiliaryTemperatureCelsius + " C"
+                : "BMP280 " + Error(sample.Bmp280);
+            string sps30 = sample.Sps30 != null && sample.Sps30.IsSuccess && sample.Sps30.Value != null
+                ? "SPS30 PM1=" + sample.Sps30.Value.MassPm1
+                    + ", PM2.5=" + sample.Sps30.Value.MassPm25
+                    + ", PM4=" + sample.Sps30.Value.MassPm4
+                    + ", PM10=" + sample.Sps30.Value.MassPm10
+                    + ", N0.5=" + sample.Sps30.Value.NumberPm05
+                    + ", N1=" + sample.Sps30.Value.NumberPm1
+                    + ", N2.5=" + sample.Sps30.Value.NumberPm25
+                    + ", N4=" + sample.Sps30.Value.NumberPm4
+                    + ", N10=" + sample.Sps30.Value.NumberPm10
+                    + ", Size=" + sample.Sps30.Value.TypicalParticleSize
+                : "SPS30 " + Error(sample.Sps30);
+            return sht40 + " | " + bmp280 + " | " + sps30;
+        }
+
+        private static string Error(Sht40ReadResult result)
+        {
+            return result == null ? "ERR null" : "ERR " + result.ErrorCode.ToString() + " " + result.ErrorMessage;
+        }
+
+        private static string Error(Bmp280ReadResult result)
+        {
+            return result == null ? "ERR null" : "ERR " + result.ErrorCode.ToString() + " " + result.ErrorMessage;
+        }
+
+        private static string Error(Sps30ReadResult result)
+        {
+            if (result != null && result.ErrorCode == SensorErrorCode.Timeout)
+            {
+                return "WAIT " + result.ErrorMessage;
+            }
+
+            return result == null ? "ERR null" : "ERR " + result.ErrorCode.ToString() + " " + result.ErrorMessage;
         }
     }
 }

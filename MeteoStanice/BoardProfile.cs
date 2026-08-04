@@ -15,6 +15,8 @@ namespace MeteoStanice
         public const int I2cSdaPin = 21;
         // Common TTGO T-Display I2C clock pin for external sensors.
         public const int I2cSclPin = 22;
+        // ESP32 I2C bus used for external meteo sensors.
+        public const int I2cBusId = 1;
         // Default UART transmit pin.
         public const int UartTxPin = 1;
         // Default UART receive pin.
