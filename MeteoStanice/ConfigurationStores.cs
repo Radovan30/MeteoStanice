@@ -126,6 +126,7 @@ namespace MeteoStanice
                 + "SubnetMask=" + Escape(configuration.SubnetMask) + "\n"
                 + "DnsAddress=" + Escape(configuration.DnsAddress) + "\n"
                 + "ApiBaseUrl=" + Escape(configuration.ApiBaseUrl) + "\n"
+                + "ApiKey=" + Escape(configuration.ApiKey) + "\n"
                 + "MeasurementIntervalMinutes=" + configuration.MeasurementIntervalMinutes + "\n"
                 + "SamplePeriodSeconds=" + configuration.SamplePeriodSeconds + "\n"
                 + "MeasurementUploadsPerCycle=" + configuration.MeasurementUploadsPerCycle + "\n"
@@ -162,7 +163,8 @@ namespace MeteoStanice
             configuration.GatewayAddress = GetValue(content, "GatewayAddress");
             configuration.SubnetMask = GetValue(content, "SubnetMask");
             configuration.DnsAddress = GetValue(content, "DnsAddress");
-            configuration.ApiBaseUrl = GetValue(content, "ApiBaseUrl");
+            configuration.ApiBaseUrl = StationConfigurationService.NormalizeApiBaseUrl(GetValue(content, "ApiBaseUrl"));
+            configuration.ApiKey = GetValue(content, "ApiKey");
             configuration.MeasurementIntervalMinutes = ParseInt(GetValue(content, "MeasurementIntervalMinutes"), 10);
             configuration.SamplePeriodSeconds = ParseInt(GetValue(content, "SamplePeriodSeconds"), 1);
             configuration.MeasurementUploadsPerCycle = ParseInt(GetValue(content, "MeasurementUploadsPerCycle"), 2);

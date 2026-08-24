@@ -68,7 +68,15 @@ namespace MeteoStanice
         /// </summary>
         public string GetDisplayTime()
         {
-            DateTime localTime = DateTime.UtcNow.AddHours(LocalOffsetHours);
+            return GetDisplayTime(DateTime.UtcNow);
+        }
+
+        /// <summary>
+        /// Builds display time text for a specific UTC timestamp in local station time.
+        /// </summary>
+        public string GetDisplayTime(DateTime utcTime)
+        {
+            DateTime localTime = utcTime.AddHours(LocalOffsetHours);
             return Two(localTime.Hour) + ":" + Two(localTime.Minute);
         }
 

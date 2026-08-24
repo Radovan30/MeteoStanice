@@ -132,7 +132,8 @@ namespace MeteoStanice
 
             return SameValue(configuration.WifiSsid, verifyConfiguration.WifiSsid)
                 && SameValue(configuration.WifiPassword, verifyConfiguration.WifiPassword)
-                && SameValue(configuration.ApiBaseUrl, verifyConfiguration.ApiBaseUrl);
+                && SameValue(configuration.ApiBaseUrl, verifyConfiguration.ApiBaseUrl)
+                && SameValue(configuration.ApiKey, verifyConfiguration.ApiKey);
         }
 
         private static bool SameValue(string left, string right)

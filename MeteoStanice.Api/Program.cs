@@ -29,6 +29,12 @@ builder.Services.AddCors(options =>
 
 var app = builder.Build();
 
+using (IServiceScope scope = app.Services.CreateScope())
+{
+    MeteoDbContext dbContext = scope.ServiceProvider.GetRequiredService<MeteoDbContext>();
+    dbContext.Database.Migrate();
+}
+
 app.UseSwagger();
 app.UseSwaggerUI(options =>
 {
@@ -39,6 +45,12 @@ app.UseSwaggerUI(options =>
 app.UseCors("Dashboard");
 app.UseAuthorization();
 app.MapGet("/", () => Results.Redirect("/swagger")).ExcludeFromDescription();
+app.MapGet("/api", () => Results.Ok(new
+{
+    status = "ok",
+    service = "MeteoStanice.Api",
+    timeUtc = DateTimeOffset.UtcNow
+}));
 app.MapControllers();
 app.MapHub<MeteoHub>("/hubs/meteo");
 

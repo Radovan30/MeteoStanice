@@ -19,14 +19,80 @@ namespace MeteoStanice
         public double RelativeHumidityPercent { get; set; }
         // Last valid atmospheric pressure.
         public double PressureHpa { get; set; }
+        // Last valid PM1.0 value.
+        public double Pm1 { get; set; }
         // Last valid PM2.5 value.
         public double Pm25 { get; set; }
+        // Last valid PM4.0 value.
+        public double Pm4 { get; set; }
         // Last valid PM10 value.
         public double Pm10 { get; set; }
+        // Last valid number concentration for particles larger than 0.5 um.
+        public double NumberPm05 { get; set; }
+        // Last valid number concentration for particles larger than 1.0 um.
+        public double NumberPm1 { get; set; }
+        // Last valid number concentration for particles larger than 2.5 um.
+        public double NumberPm25 { get; set; }
+        // Last valid number concentration for particles larger than 4.0 um.
+        public double NumberPm4 { get; set; }
+        // Last valid number concentration for particles larger than 10 um.
+        public double NumberPm10 { get; set; }
+        // Last valid typical particle size.
+        public double TypicalParticleSize { get; set; }
         // Number of successful sensor values included in this record.
         public int ValidValueCount { get; set; }
         // Number of failed sensor reads included in this record.
         public int FailedReadCount { get; set; }
+        // Number of samples expected in this interval.
+        public int ExpectedSampleCount { get; set; }
+        // Number of samples received in this interval.
+        public int ReceivedSampleCount { get; set; }
+        // Successful SHT40 reads in the interval.
+        public int Sht40OkCount { get; set; }
+        // Failed SHT40 reads in the interval.
+        public int Sht40ErrorCount { get; set; }
+        // Successful BMP280 reads in the interval.
+        public int Bmp280OkCount { get; set; }
+        // Failed BMP280 reads in the interval.
+        public int Bmp280ErrorCount { get; set; }
+        // Successful SPS30 reads in the interval.
+        public int Sps30OkCount { get; set; }
+        // SPS30 reads where data was not ready yet.
+        public int Sps30WaitCount { get; set; }
+        // Failed SPS30 reads in the interval.
+        public int Sps30ErrorCount { get; set; }
+        // SPS30 reads skipped because station was on battery.
+        public int Sps30BatterySkippedCount { get; set; }
+        // Minimum temperature observed in the interval.
+        public double TemperatureMin { get; set; }
+        // Maximum temperature observed in the interval.
+        public double TemperatureMax { get; set; }
+        // Temperature standard deviation in the interval.
+        public double TemperatureStdDev { get; set; }
+        // Minimum humidity observed in the interval.
+        public double HumidityMin { get; set; }
+        // Maximum humidity observed in the interval.
+        public double HumidityMax { get; set; }
+        // Humidity standard deviation in the interval.
+        public double HumidityStdDev { get; set; }
+        // Minimum pressure observed in the interval.
+        public double PressureMin { get; set; }
+        // Maximum pressure observed in the interval.
+        public double PressureMax { get; set; }
+        // Pressure standard deviation in the interval.
+        public double PressureStdDev { get; set; }
+        // Minimum PM2.5 observed in the interval.
+        public double Pm25Min { get; set; }
+        // Maximum PM2.5 observed in the interval.
+        public double Pm25Max { get; set; }
+        // PM2.5 standard deviation in the interval.
+        public double Pm25StdDev { get; set; }
+        // Minimum PM10 observed in the interval.
+        public double Pm10Min { get; set; }
+        // Maximum PM10 observed in the interval.
+        public double Pm10Max { get; set; }
+        // PM10 standard deviation in the interval.
+        public double Pm10StdDev { get; set; }
         // Quality status for this record.
         public MeasurementStatus Status { get; set; }
     }
@@ -91,9 +157,17 @@ namespace MeteoStanice
         {
             if (result != null && result.IsSuccess && result.Value != null)
             {
+                record.Pm1 = result.Value.MassPm1;
                 record.Pm25 = result.Value.MassPm25;
+                record.Pm4 = result.Value.MassPm4;
                 record.Pm10 = result.Value.MassPm10;
-                record.ValidValueCount += 2;
+                record.NumberPm05 = result.Value.NumberPm05;
+                record.NumberPm1 = result.Value.NumberPm1;
+                record.NumberPm25 = result.Value.NumberPm25;
+                record.NumberPm4 = result.Value.NumberPm4;
+                record.NumberPm10 = result.Value.NumberPm10;
+                record.TypicalParticleSize = result.Value.TypicalParticleSize;
+                record.ValidValueCount += 10;
                 return;
             }
 

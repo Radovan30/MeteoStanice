@@ -89,19 +89,76 @@ namespace MeteoStanice.Data.Migrations
                     b.Property<double?>("BatteryVoltage")
                         .HasColumnType("double precision");
 
+                    b.Property<int>("Bmp280ErrorCount")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("Bmp280OkCount")
+                        .HasColumnType("integer");
+
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<int>("ExpectedSampleCount")
+                        .HasColumnType("integer");
+
+                    b.Property<double?>("HumidityMax")
+                        .HasColumnType("double precision");
+
+                    b.Property<double?>("HumidityMin")
+                        .HasColumnType("double precision");
+
                     b.Property<double?>("HumidityPercent")
+                        .HasColumnType("double precision");
+
+                    b.Property<double?>("HumidityStdDev")
                         .HasColumnType("double precision");
 
                     b.Property<DateTimeOffset>("MeasuredAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<double?>("NumberPm05")
+                        .HasColumnType("double precision");
+
+                    b.Property<double?>("NumberPm1")
+                        .HasColumnType("double precision");
+
+                    b.Property<double?>("NumberPm10")
+                        .HasColumnType("double precision");
+
+                    b.Property<double?>("NumberPm25")
+                        .HasColumnType("double precision");
+
+                    b.Property<double?>("NumberPm4")
+                        .HasColumnType("double precision");
+
+                    b.Property<double?>("Pm1")
+                        .HasColumnType("double precision");
+
                     b.Property<double?>("Pm10")
                         .HasColumnType("double precision");
 
+                    b.Property<double?>("Pm10Max")
+                        .HasColumnType("double precision");
+
+                    b.Property<double?>("Pm10Min")
+                        .HasColumnType("double precision");
+
+                    b.Property<double?>("Pm10StdDev")
+                        .HasColumnType("double precision");
+
                     b.Property<double?>("Pm25")
+                        .HasColumnType("double precision");
+
+                    b.Property<double?>("Pm25Max")
+                        .HasColumnType("double precision");
+
+                    b.Property<double?>("Pm25Min")
+                        .HasColumnType("double precision");
+
+                    b.Property<double?>("Pm25StdDev")
+                        .HasColumnType("double precision");
+
+                    b.Property<double?>("Pm4")
                         .HasColumnType("double precision");
 
                     b.Property<string>("PowerSource")
@@ -112,7 +169,37 @@ namespace MeteoStanice.Data.Migrations
                     b.Property<double?>("PressureHpa")
                         .HasColumnType("double precision");
 
+                    b.Property<double?>("PressureMax")
+                        .HasColumnType("double precision");
+
+                    b.Property<double?>("PressureMin")
+                        .HasColumnType("double precision");
+
+                    b.Property<double?>("PressureStdDev")
+                        .HasColumnType("double precision");
+
+                    b.Property<int>("ReceivedSampleCount")
+                        .HasColumnType("integer");
+
                     b.Property<int>("SequenceNumber")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("Sht40ErrorCount")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("Sht40OkCount")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("Sps30BatterySkippedCount")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("Sps30ErrorCount")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("Sps30OkCount")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("Sps30WaitCount")
                         .HasColumnType("integer");
 
                     b.Property<long>("StationId")
@@ -124,6 +211,18 @@ namespace MeteoStanice.Data.Migrations
                         .HasColumnType("character varying(64)");
 
                     b.Property<double?>("TemperatureCelsius")
+                        .HasColumnType("double precision");
+
+                    b.Property<double?>("TemperatureMax")
+                        .HasColumnType("double precision");
+
+                    b.Property<double?>("TemperatureMin")
+                        .HasColumnType("double precision");
+
+                    b.Property<double?>("TemperatureStdDev")
+                        .HasColumnType("double precision");
+
+                    b.Property<double?>("TypicalParticleSize")
                         .HasColumnType("double precision");
 
                     b.HasKey("Id");

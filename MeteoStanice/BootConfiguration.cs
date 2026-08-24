@@ -34,6 +34,8 @@ namespace MeteoStanice
         public string DnsAddress { get; set; }
         // Server API base URL.
         public string ApiBaseUrl { get; set; }
+        // Optional API key sent with station uploads.
+        public string ApiKey { get; set; }
         // Length of one final measurement interval in minutes.
         public int MeasurementIntervalMinutes { get; set; }
         // Delay between individual sensor samples in seconds.
@@ -156,6 +158,7 @@ namespace MeteoStanice
             configuration.SubnetMask = "255.255.255.0";
             configuration.DnsAddress = "8.8.8.8";
             configuration.ApiBaseUrl = string.Empty;
+            configuration.ApiKey = string.Empty;
             configuration.MeasurementIntervalMinutes = 10;
             configuration.SamplePeriodSeconds = 1;
             configuration.MeasurementUploadsPerCycle = 2;
@@ -179,6 +182,51 @@ namespace MeteoStanice
                 && configuration.StationId != null
                 && configuration.DeviceHardwareId != null
                 && configuration.ProvisioningWindowMilliseconds > 0;
+        }
+
+        public static string NormalizeApiBaseUrl(string apiBaseUrl)
+        {
+            if (apiBaseUrl == null)
+            {
+                return string.Empty;
+            }
+
+            string normalized = apiBaseUrl.Trim();
+            if (normalized.Length == 0)
+            {
+                return string.Empty;
+            }
+
+            if (normalized.IndexOf("://") < 0)
+            {
+                normalized = "http://" + normalized;
+            }
+
+            int hostStart = normalized.IndexOf("://") + 3;
+            int pathStart = normalized.IndexOf("/", hostStart);
+            int hostEnd = pathStart < 0 ? normalized.Length : pathStart;
+            string host = normalized.Substring(hostStart, hostEnd - hostStart);
+            if (host.IndexOf(":") < 0)
+            {
+                normalized = normalized.Substring(0, hostEnd) + ":5181" + normalized.Substring(hostEnd);
+            }
+
+            pathStart = normalized.IndexOf("/", hostStart);
+            if (pathStart < 0)
+            {
+                normalized += "/api";
+            }
+            else if (pathStart == normalized.Length - 1)
+            {
+                normalized = normalized.Substring(0, normalized.Length - 1) + "/api";
+            }
+
+            while (normalized.Length > 0 && normalized[normalized.Length - 1] == '/')
+            {
+                normalized = normalized.Substring(0, normalized.Length - 1);
+            }
+
+            return normalized;
         }
 
         private static bool EnsureRuntimeDefaults(StationConfiguration configuration)
@@ -212,6 +260,19 @@ namespace MeteoStanice
             if (configuration.LocationText == null)
             {
                 configuration.LocationText = string.Empty;
+                changed = true;
+            }
+
+            if (configuration.ApiKey == null)
+            {
+                configuration.ApiKey = string.Empty;
+                changed = true;
+            }
+
+            string normalizedApiBaseUrl = NormalizeApiBaseUrl(configuration.ApiBaseUrl);
+            if (configuration.ApiBaseUrl != normalizedApiBaseUrl)
+            {
+                configuration.ApiBaseUrl = normalizedApiBaseUrl;
                 changed = true;
             }
 

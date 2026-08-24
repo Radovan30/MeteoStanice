@@ -93,14 +93,43 @@ namespace MeteoStanice
         private int _failedReadCount;
         private double _temperatureSum;
         private int _temperatureCount;
+        private readonly NanoRunningStatistics _temperatureStats = new NanoRunningStatistics();
         private double _humiditySum;
         private int _humidityCount;
+        private readonly NanoRunningStatistics _humidityStats = new NanoRunningStatistics();
         private double _pressureSum;
         private int _pressureCount;
+        private readonly NanoRunningStatistics _pressureStats = new NanoRunningStatistics();
+        private double _pm1Sum;
+        private int _pm1Count;
         private double _pm25Sum;
         private int _pm25Count;
+        private readonly NanoRunningStatistics _pm25Stats = new NanoRunningStatistics();
+        private double _pm4Sum;
+        private int _pm4Count;
         private double _pm10Sum;
         private int _pm10Count;
+        private readonly NanoRunningStatistics _pm10Stats = new NanoRunningStatistics();
+        private double _numberPm05Sum;
+        private int _numberPm05Count;
+        private double _numberPm1Sum;
+        private int _numberPm1Count;
+        private double _numberPm25Sum;
+        private int _numberPm25Count;
+        private double _numberPm4Sum;
+        private int _numberPm4Count;
+        private double _numberPm10Sum;
+        private int _numberPm10Count;
+        private double _typicalParticleSizeSum;
+        private int _typicalParticleSizeCount;
+        private int _sht40OkCount;
+        private int _sht40ErrorCount;
+        private int _bmp280OkCount;
+        private int _bmp280ErrorCount;
+        private int _sps30OkCount;
+        private int _sps30WaitCount;
+        private int _sps30ErrorCount;
+        private int _sps30BatterySkippedCount;
         private MeasurementStatus _status;
         private DateTime _intervalStartedAt;
         private NanoSensorReadSet _lastReadSet;
@@ -123,6 +152,14 @@ namespace MeteoStanice
             }
         }
 
+        public DateTime IntervalStartedAt
+        {
+            get
+            {
+                return _intervalStartedAt;
+            }
+        }
+
         // Last raw sensor read set captured by the current cycle.
         public NanoSensorReadSet LastReadSet
         {
@@ -142,20 +179,21 @@ namespace MeteoStanice
             _lastReadSet = sample;
             AddSample(sample, powerState);
             int expectedSamples = GetExpectedSamples(configuration);
+            DateTime intervalEndsAt = GetIntervalEndsAt(configuration);
             if (ShouldLogSampleProgress(_sampleCount, expectedSamples))
             {
                 Debug.WriteLine("Vzorek " + _sampleCount + "/" + expectedSamples + ": SHT40=" + State(sample.Sht40) + ", BMP280=" + State(sample.Bmp280) + ", SPS30=" + State(sample.Sps30));
                 Debug.WriteLine("Sensor values: " + Values(sample));
             }
 
-            if (_sampleCount < expectedSamples)
+            if (sample.SampledAt < intervalEndsAt)
             {
                 record = null;
                 return false;
             }
 
-            record = CloseInterval(stationId, sample.SampledAt, expectedSamples);
-            Reset(sample.SampledAt);
+            record = CloseInterval(stationId, intervalEndsAt, expectedSamples);
+            Reset(intervalEndsAt);
             return true;
         }
 
@@ -168,6 +206,12 @@ namespace MeteoStanice
             int sampleSeconds = configuration.SamplePeriodSeconds < 1 ? 1 : configuration.SamplePeriodSeconds;
             int expected = (intervalMinutes * 60) / sampleSeconds;
             return expected < 1 ? 1 : expected;
+        }
+
+        public DateTime GetIntervalEndsAt(StationConfiguration configuration)
+        {
+            int intervalMinutes = configuration.MeasurementIntervalMinutes < 1 ? 10 : configuration.MeasurementIntervalMinutes;
+            return _intervalStartedAt.AddMinutes(intervalMinutes);
         }
 
         private void AddSample(NanoSensorReadSet sample, NanoPowerState powerState)
@@ -190,13 +234,17 @@ namespace MeteoStanice
             {
                 _temperatureSum += result.Value.TemperatureCelsius;
                 _temperatureCount++;
+                _temperatureStats.Add(result.Value.TemperatureCelsius);
                 _humiditySum += result.Value.RelativeHumidityPercent;
                 _humidityCount++;
+                _humidityStats.Add(result.Value.RelativeHumidityPercent);
                 _validValueCount += 2;
+                _sht40OkCount++;
                 return;
             }
 
             _failedReadCount++;
+            _sht40ErrorCount++;
             AddStatus(MeasurementStatus.Sht40ReadFailed);
         }
 
@@ -206,11 +254,14 @@ namespace MeteoStanice
             {
                 _pressureSum += result.Value.PressureHpa;
                 _pressureCount++;
+                _pressureStats.Add(result.Value.PressureHpa);
                 _validValueCount++;
+                _bmp280OkCount++;
                 return;
             }
 
             _failedReadCount++;
+            _bmp280ErrorCount++;
             AddStatus(MeasurementStatus.Bmp280ReadFailed);
         }
 
@@ -218,20 +269,49 @@ namespace MeteoStanice
         {
             if (result != null && result.IsSuccess && result.Value != null)
             {
+                _pm1Sum += result.Value.MassPm1;
+                _pm1Count++;
                 _pm25Sum += result.Value.MassPm25;
                 _pm25Count++;
+                _pm25Stats.Add(result.Value.MassPm25);
+                _pm4Sum += result.Value.MassPm4;
+                _pm4Count++;
                 _pm10Sum += result.Value.MassPm10;
                 _pm10Count++;
-                _validValueCount += 2;
+                _pm10Stats.Add(result.Value.MassPm10);
+                _numberPm05Sum += result.Value.NumberPm05;
+                _numberPm05Count++;
+                _numberPm1Sum += result.Value.NumberPm1;
+                _numberPm1Count++;
+                _numberPm25Sum += result.Value.NumberPm25;
+                _numberPm25Count++;
+                _numberPm4Sum += result.Value.NumberPm4;
+                _numberPm4Count++;
+                _numberPm10Sum += result.Value.NumberPm10;
+                _numberPm10Count++;
+                _typicalParticleSizeSum += result.Value.TypicalParticleSize;
+                _typicalParticleSizeCount++;
+                _validValueCount += 10;
+                _sps30OkCount++;
                 return;
             }
 
             if (result != null && result.ErrorCode == SensorErrorCode.Timeout)
             {
+                _sps30WaitCount++;
                 return;
             }
 
             _failedReadCount++;
+            if (result != null && result.ErrorCode == SensorErrorCode.DisabledOnBattery)
+            {
+                _sps30BatterySkippedCount++;
+            }
+            else
+            {
+                _sps30ErrorCount++;
+            }
+
             AddStatus(result != null && result.ErrorCode == SensorErrorCode.DisabledOnBattery
                 ? MeasurementStatus.Sps30DisabledOnBattery
                 : MeasurementStatus.Sps30ReadFailed);
@@ -248,10 +328,43 @@ namespace MeteoStanice
             record.TemperatureCelsius = Average(_temperatureSum, _temperatureCount);
             record.RelativeHumidityPercent = Average(_humiditySum, _humidityCount);
             record.PressureHpa = Average(_pressureSum, _pressureCount);
+            record.Pm1 = Average(_pm1Sum, _pm1Count);
             record.Pm25 = Average(_pm25Sum, _pm25Count);
+            record.Pm4 = Average(_pm4Sum, _pm4Count);
             record.Pm10 = Average(_pm10Sum, _pm10Count);
+            record.NumberPm05 = Average(_numberPm05Sum, _numberPm05Count);
+            record.NumberPm1 = Average(_numberPm1Sum, _numberPm1Count);
+            record.NumberPm25 = Average(_numberPm25Sum, _numberPm25Count);
+            record.NumberPm4 = Average(_numberPm4Sum, _numberPm4Count);
+            record.NumberPm10 = Average(_numberPm10Sum, _numberPm10Count);
+            record.TypicalParticleSize = Average(_typicalParticleSizeSum, _typicalParticleSizeCount);
             record.ValidValueCount = _validValueCount;
             record.FailedReadCount = _failedReadCount;
+            record.ExpectedSampleCount = expectedSamples;
+            record.ReceivedSampleCount = _sampleCount;
+            record.Sht40OkCount = _sht40OkCount;
+            record.Sht40ErrorCount = _sht40ErrorCount;
+            record.Bmp280OkCount = _bmp280OkCount;
+            record.Bmp280ErrorCount = _bmp280ErrorCount;
+            record.Sps30OkCount = _sps30OkCount;
+            record.Sps30WaitCount = _sps30WaitCount;
+            record.Sps30ErrorCount = _sps30ErrorCount;
+            record.Sps30BatterySkippedCount = _sps30BatterySkippedCount;
+            record.TemperatureMin = _temperatureStats.Minimum;
+            record.TemperatureMax = _temperatureStats.Maximum;
+            record.TemperatureStdDev = _temperatureStats.StandardDeviation();
+            record.HumidityMin = _humidityStats.Minimum;
+            record.HumidityMax = _humidityStats.Maximum;
+            record.HumidityStdDev = _humidityStats.StandardDeviation();
+            record.PressureMin = _pressureStats.Minimum;
+            record.PressureMax = _pressureStats.Maximum;
+            record.PressureStdDev = _pressureStats.StandardDeviation();
+            record.Pm25Min = _pm25Stats.Minimum;
+            record.Pm25Max = _pm25Stats.Maximum;
+            record.Pm25StdDev = _pm25Stats.StandardDeviation();
+            record.Pm10Min = _pm10Stats.Minimum;
+            record.Pm10Max = _pm10Stats.Maximum;
+            record.Pm10StdDev = _pm10Stats.StandardDeviation();
             record.Status = ResolveStatus(expectedSamples);
             Debug.WriteLine("Interval uzavren od " + _intervalStartedAt + " do " + endedAt + ", record #" + record.SequenceNumber + ", samples=" + _sampleCount + ", status=" + record.Status.ToString());
             return record;
@@ -287,14 +400,43 @@ namespace MeteoStanice
             _failedReadCount = 0;
             _temperatureSum = 0;
             _temperatureCount = 0;
+            _temperatureStats.Reset();
             _humiditySum = 0;
             _humidityCount = 0;
+            _humidityStats.Reset();
             _pressureSum = 0;
             _pressureCount = 0;
+            _pressureStats.Reset();
+            _pm1Sum = 0;
+            _pm1Count = 0;
             _pm25Sum = 0;
             _pm25Count = 0;
+            _pm25Stats.Reset();
+            _pm4Sum = 0;
+            _pm4Count = 0;
             _pm10Sum = 0;
             _pm10Count = 0;
+            _pm10Stats.Reset();
+            _numberPm05Sum = 0;
+            _numberPm05Count = 0;
+            _numberPm1Sum = 0;
+            _numberPm1Count = 0;
+            _numberPm25Sum = 0;
+            _numberPm25Count = 0;
+            _numberPm4Sum = 0;
+            _numberPm4Count = 0;
+            _numberPm10Sum = 0;
+            _numberPm10Count = 0;
+            _typicalParticleSizeSum = 0;
+            _typicalParticleSizeCount = 0;
+            _sht40OkCount = 0;
+            _sht40ErrorCount = 0;
+            _bmp280OkCount = 0;
+            _bmp280ErrorCount = 0;
+            _sps30OkCount = 0;
+            _sps30WaitCount = 0;
+            _sps30ErrorCount = 0;
+            _sps30BatterySkippedCount = 0;
             _status = MeasurementStatus.Ok;
             _intervalStartedAt = startedAt;
         }

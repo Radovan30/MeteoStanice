@@ -22,6 +22,9 @@ namespace MeteoStanice
         private string _lastModeText;
         private string _lastDateText;
         private string _lastTimeText;
+        private string _lastUploadTimeText;
+        private string _lastUploadStatusText;
+        private string _lastQueueStatusText;
         private string _lastWifiText;
         private string _lastSsidText;
         private string _lastIpText;
@@ -201,7 +204,31 @@ namespace MeteoStanice
         /// </summary>
         public void ShowRuntime(int counter, bool wifiConnected, string wifiSsid, string ipAddress, string wifiMessage, string dateText, string timeText, string locationText, bool batteryActive, double batteryVoltage, bool hasBatteryVoltage)
         {
-            DrawStatus(counter, false, wifiConnected, wifiSsid, ipAddress, wifiMessage, dateText, timeText, locationText, batteryActive, batteryVoltage, hasBatteryVoltage);
+            ShowRuntime(counter, wifiConnected, wifiSsid, ipAddress, wifiMessage, dateText, timeText, locationText, batteryActive, batteryVoltage, hasBatteryVoltage, string.Empty);
+        }
+
+        /// <summary>
+        /// Shows a compact runtime status block with current station time and next upload time.
+        /// </summary>
+        public void ShowRuntime(int counter, bool wifiConnected, string wifiSsid, string ipAddress, string wifiMessage, string dateText, string timeText, string locationText, bool batteryActive, double batteryVoltage, bool hasBatteryVoltage, string uploadTimeText)
+        {
+            ShowRuntime(counter, wifiConnected, wifiSsid, ipAddress, wifiMessage, dateText, timeText, locationText, batteryActive, batteryVoltage, hasBatteryVoltage, uploadTimeText, string.Empty);
+        }
+
+        /// <summary>
+        /// Shows a compact runtime status block with current station time, next upload time and last upload result.
+        /// </summary>
+        public void ShowRuntime(int counter, bool wifiConnected, string wifiSsid, string ipAddress, string wifiMessage, string dateText, string timeText, string locationText, bool batteryActive, double batteryVoltage, bool hasBatteryVoltage, string uploadTimeText, string uploadStatusText)
+        {
+            ShowRuntime(counter, wifiConnected, wifiSsid, ipAddress, wifiMessage, dateText, timeText, locationText, batteryActive, batteryVoltage, hasBatteryVoltage, uploadTimeText, uploadStatusText, string.Empty);
+        }
+
+        /// <summary>
+        /// Shows a compact runtime status block with upload and queue state.
+        /// </summary>
+        public void ShowRuntime(int counter, bool wifiConnected, string wifiSsid, string ipAddress, string wifiMessage, string dateText, string timeText, string locationText, bool batteryActive, double batteryVoltage, bool hasBatteryVoltage, string uploadTimeText, string uploadStatusText, string queueStatusText)
+        {
+            DrawStatus(counter, false, wifiConnected, wifiSsid, ipAddress, wifiMessage, dateText, timeText, locationText, batteryActive, batteryVoltage, hasBatteryVoltage, uploadTimeText, uploadStatusText, queueStatusText);
         }
 
         /// <summary>
@@ -235,6 +262,31 @@ namespace MeteoStanice
             }
         }
 
+        /// <summary>
+        /// Shows that sensor state is temporarily unknown while power rails settle.
+        /// </summary>
+        public void ShowSensorPending()
+        {
+            if (!_initialized)
+            {
+                return;
+            }
+
+            try
+            {
+                FillLandscapeBlock(12, 120, 210, 12, Color.Black);
+                DrawSensorIndicator(12, 121, "SHT", Color.Orange);
+                DrawSensorIndicator(70, 121, "BMP", Color.Orange);
+                DrawSensorIndicator(128, 121, "SPS", Color.Orange);
+                FlushLandscapeBlock(12, 120, 210, 12);
+                _lastSensorStatusText = "PENDING";
+            }
+            catch (Exception exception)
+            {
+                Debug.WriteLine("TTGO display sensor pending selhal: " + exception.Message);
+            }
+        }
+
         private void DrawStatus(int counter, bool provisioningActive, bool wifiConnected, string wifiSsid, string ipAddress, string wifiMessage)
         {
             DrawStatus(counter, provisioningActive, wifiConnected, wifiSsid, ipAddress, wifiMessage, string.Empty, string.Empty, string.Empty, false, 0, false);
@@ -252,6 +304,21 @@ namespace MeteoStanice
 
         private void DrawStatus(int counter, bool provisioningActive, bool wifiConnected, string wifiSsid, string ipAddress, string wifiMessage, string dateText, string timeText, string locationText, bool batteryActive, double batteryVoltage, bool hasBatteryVoltage)
         {
+            DrawStatus(counter, provisioningActive, wifiConnected, wifiSsid, ipAddress, wifiMessage, dateText, timeText, locationText, batteryActive, batteryVoltage, hasBatteryVoltage, string.Empty, string.Empty);
+        }
+
+        private void DrawStatus(int counter, bool provisioningActive, bool wifiConnected, string wifiSsid, string ipAddress, string wifiMessage, string dateText, string timeText, string locationText, bool batteryActive, double batteryVoltage, bool hasBatteryVoltage, string uploadTimeText)
+        {
+            DrawStatus(counter, provisioningActive, wifiConnected, wifiSsid, ipAddress, wifiMessage, dateText, timeText, locationText, batteryActive, batteryVoltage, hasBatteryVoltage, uploadTimeText, string.Empty);
+        }
+
+        private void DrawStatus(int counter, bool provisioningActive, bool wifiConnected, string wifiSsid, string ipAddress, string wifiMessage, string dateText, string timeText, string locationText, bool batteryActive, double batteryVoltage, bool hasBatteryVoltage, string uploadTimeText, string uploadStatusText)
+        {
+            DrawStatus(counter, provisioningActive, wifiConnected, wifiSsid, ipAddress, wifiMessage, dateText, timeText, locationText, batteryActive, batteryVoltage, hasBatteryVoltage, uploadTimeText, uploadStatusText, string.Empty);
+        }
+
+        private void DrawStatus(int counter, bool provisioningActive, bool wifiConnected, string wifiSsid, string ipAddress, string wifiMessage, string dateText, string timeText, string locationText, bool batteryActive, double batteryVoltage, bool hasBatteryVoltage, string uploadTimeText, string uploadStatusText, string queueStatusText)
+        {
             if (!_initialized)
             {
                 return;
@@ -262,7 +329,7 @@ namespace MeteoStanice
                 string modeText = provisioningActive ? "SETUP" : "METEO";
                 string ssidText = WifiSsidLine(wifiSsid, wifiConnected, wifiMessage);
                 string ipText = "IP " + NormalizeDisplayText(ipAddress, 18);
-                DrawStatus(provisioningActive, wifiConnected, modeText, ssidText, ipText, NormalizeDisplayText(wifiMessage, 18), dateText, timeText, locationText, batteryActive, batteryVoltage, hasBatteryVoltage);
+                DrawStatus(provisioningActive, wifiConnected, modeText, ssidText, ipText, NormalizeDisplayText(wifiMessage, 18), dateText, timeText, locationText, batteryActive, batteryVoltage, hasBatteryVoltage, uploadTimeText, uploadStatusText, queueStatusText);
             }
             catch (Exception exception)
             {
@@ -287,10 +354,28 @@ namespace MeteoStanice
 
         private void DrawStatus(bool provisioningActive, bool wifiConnected, string modeText, string line1, string line2, string line3, string dateText, string timeText, string locationText, bool batteryActive, double batteryVoltage, bool hasBatteryVoltage)
         {
+            DrawStatus(provisioningActive, wifiConnected, modeText, line1, line2, line3, dateText, timeText, locationText, batteryActive, batteryVoltage, hasBatteryVoltage, string.Empty, string.Empty);
+        }
+
+        private void DrawStatus(bool provisioningActive, bool wifiConnected, string modeText, string line1, string line2, string line3, string dateText, string timeText, string locationText, bool batteryActive, double batteryVoltage, bool hasBatteryVoltage, string uploadTimeText)
+        {
+            DrawStatus(provisioningActive, wifiConnected, modeText, line1, line2, line3, dateText, timeText, locationText, batteryActive, batteryVoltage, hasBatteryVoltage, uploadTimeText, string.Empty);
+        }
+
+        private void DrawStatus(bool provisioningActive, bool wifiConnected, string modeText, string line1, string line2, string line3, string dateText, string timeText, string locationText, bool batteryActive, double batteryVoltage, bool hasBatteryVoltage, string uploadTimeText, string uploadStatusText)
+        {
+            DrawStatus(provisioningActive, wifiConnected, modeText, line1, line2, line3, dateText, timeText, locationText, batteryActive, batteryVoltage, hasBatteryVoltage, uploadTimeText, uploadStatusText, string.Empty);
+        }
+
+        private void DrawStatus(bool provisioningActive, bool wifiConnected, string modeText, string line1, string line2, string line3, string dateText, string timeText, string locationText, bool batteryActive, double batteryVoltage, bool hasBatteryVoltage, string uploadTimeText, string uploadStatusText, string queueStatusText)
+        {
             Color modeColor = provisioningActive ? Color.Orange : Color.LimeGreen;
             Color line1Color = line1 == "WIFI OFF" ? Color.DarkRed : Color.White;
             string normalizedDateText = NormalizeOptionalDisplayText(dateText, 10);
             string normalizedTimeText = NormalizeOptionalDisplayText(timeText, 5);
+            string normalizedUploadTimeText = UploadTimeLine(uploadTimeText);
+            string normalizedUploadStatusText = UploadStatusLine(uploadStatusText);
+            string normalizedQueueStatusText = QueueStatusLine(queueStatusText);
             string normalizedLocationText = LocationLine(locationText);
             string powerText = PowerLine(batteryActive);
 
@@ -298,20 +383,26 @@ namespace MeteoStanice
             DrawWifiIndicatorIfChanged(wifiConnected);
             DrawTextLineIfChanged(12, 6, 76, 18, modeText, _lastModeText, modeColor, 2);
             DrawTextLineIfChanged(CenteredX(94, 114, normalizedDateText, 1), 7, 70, 8, normalizedDateText, _lastDateText, Color.White, 1);
-            DrawTextLineIfChanged(CenteredX(94, 114, normalizedTimeText, 1), 18, 42, 8, normalizedTimeText, _lastTimeText, Color.White, 1);
+            DrawTextLineIfChanged(96, 18, 42, 8, normalizedTimeText, _lastTimeText, Color.White, 1);
+            DrawTextLineIfChanged(154, 18, 58, 8, normalizedUploadTimeText, _lastUploadTimeText, Color.Orange, 1);
             DrawTextLineIfChanged(12, 42, 180, 10, line1, _lastWifiText, Color.White, 1);
             DrawTextLineIfChanged(12, 62, 180, 10, line2, _lastSsidText, Color.White, 1);
             DrawTextLineIfChanged(12, 82, 180, 10, line3, _lastIpText, Color.White, 1);
-            DrawTextLineIfChanged(12, 102, 150, 10, normalizedLocationText, _lastLocationText, Color.White, 1);
+            DrawTextLineIfChanged(12, 102, 118, 10, normalizedLocationText, _lastLocationText, Color.White, 1);
+            DrawTextLineIfChanged(134, 102, 26, 10, normalizedQueueStatusText, _lastQueueStatusText, QueueStatusColor(queueStatusText), 1);
+            DrawTextLineIfChanged(164, 102, 36, 10, normalizedUploadStatusText, _lastUploadStatusText, UploadStatusColor(uploadStatusText), 1);
             DrawTextLineIfChanged(204, 102, 24, 10, powerText, _lastPowerText, PowerColor(batteryActive), 1);
 
             _lastModeText = modeText;
             _lastDateText = normalizedDateText;
             _lastTimeText = normalizedTimeText;
+            _lastUploadTimeText = normalizedUploadTimeText;
             _lastWifiText = line1;
             _lastSsidText = line2;
             _lastIpText = line3;
             _lastLocationText = normalizedLocationText;
+            _lastQueueStatusText = normalizedQueueStatusText;
+            _lastUploadStatusText = normalizedUploadStatusText;
             _lastPowerText = powerText;
         }
 
@@ -368,6 +459,9 @@ namespace MeteoStanice
             _lastModeText = null;
             _lastDateText = null;
             _lastTimeText = null;
+            _lastUploadTimeText = null;
+            _lastUploadStatusText = null;
+            _lastQueueStatusText = null;
             _lastWifiText = null;
             _lastSsidText = null;
             _lastIpText = null;
@@ -532,9 +626,84 @@ namespace MeteoStanice
             return batteryActive ? "BAT" : "SRC";
         }
 
+        private static string UploadTimeLine(string uploadTimeText)
+        {
+            if (uploadTimeText == null || uploadTimeText.Length == 0)
+            {
+                return string.Empty;
+            }
+
+            return "UP " + NormalizeDisplayText(uploadTimeText, 5);
+        }
+
+        private static string UploadStatusLine(string uploadStatusText)
+        {
+            if (uploadStatusText == null || uploadStatusText.Length == 0)
+            {
+                return "U --";
+            }
+
+            if (uploadStatusText.Length > 0 && uploadStatusText[0] == 'H')
+            {
+                return NormalizeDisplayText(uploadStatusText, 5);
+            }
+
+            return "U " + NormalizeDisplayText(uploadStatusText, 3);
+        }
+
+        private static string QueueStatusLine(string queueStatusText)
+        {
+            if (queueStatusText == null || queueStatusText.Length == 0)
+            {
+                return "Q--";
+            }
+
+            return NormalizeDisplayText(queueStatusText, 3);
+        }
+
         private static Color PowerColor(bool batteryActive)
         {
             return batteryActive ? Color.Orange : Color.LimeGreen;
+        }
+
+        private static Color UploadStatusColor(string uploadStatusText)
+        {
+            if (uploadStatusText == null || uploadStatusText.Length == 0 || uploadStatusText == "--")
+            {
+                return Color.Orange;
+            }
+
+            if (uploadStatusText == "OK")
+            {
+                return Color.LimeGreen;
+            }
+
+            if (uploadStatusText.Length > 1 && uploadStatusText[0] == 'H' && uploadStatusText[1] == '2')
+            {
+                return Color.LimeGreen;
+            }
+
+            return Color.DarkRed;
+        }
+
+        private static Color QueueStatusColor(string queueStatusText)
+        {
+            if (queueStatusText == null || queueStatusText.Length == 0)
+            {
+                return Color.Orange;
+            }
+
+            if (queueStatusText[0] == 'D')
+            {
+                return Color.DarkRed;
+            }
+
+            if (queueStatusText == "Q00")
+            {
+                return Color.LimeGreen;
+            }
+
+            return Color.Orange;
         }
 
         private static string WifiShortState(bool wifiConnected, string wifiMessage)

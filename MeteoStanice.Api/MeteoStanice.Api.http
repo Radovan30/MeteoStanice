@@ -1,6 +1,28 @@
 @MeteoStanice.Api_HostAddress = http://localhost:5181
+@StationApiKey = meteo-local-key
 
-GET {{MeteoStanice.Api_HostAddress}}/weatherforecast/
+GET {{MeteoStanice.Api_HostAddress}}/api
 Accept: application/json
+
+###
+
+POST {{MeteoStanice.Api_HostAddress}}/api/measurements
+Content-Type: application/json
+X-Api-Key: {{StationApiKey}}
+
+{
+  "stationGuid": "11111111-1111-1111-1111-111111111111",
+  "stationCode": "METEO-TEST-001",
+  "sequenceNumber": 1,
+  "measuredAt": "2026-08-19T06:00:00Z",
+  "temperatureCelsius": 22.5,
+  "humidityPercent": 48.2,
+  "pressureHpa": 1012.7,
+  "pm25": 5.1,
+  "pm10": 7.4,
+  "expectedSampleCount": 60,
+  "receivedSampleCount": 60,
+  "status": "Ok"
+}
 
 ###

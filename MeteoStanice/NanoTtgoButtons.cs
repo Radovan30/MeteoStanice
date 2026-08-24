@@ -14,6 +14,8 @@ namespace MeteoStanice
         private bool _initialized;
         private bool _requestConsumed;
         private bool _ignoreUntilReleased;
+        private bool _requestLatched;
+        private bool _monitorStarted;
         private long _blockedUntilTicks;
 
         /// <summary>
@@ -26,6 +28,7 @@ namespace MeteoStanice
                 _gpioController = new GpioController();
                 _gpioController.OpenPin(BoardProfile.SetupButtonPin, PinMode.Input);
                 _initialized = true;
+                StartMonitor();
                 Debug.WriteLine("TTGO setup tlacitko GPIO" + BoardProfile.SetupButtonPin + " inicializovano.");
                 return true;
             }
@@ -41,6 +44,14 @@ namespace MeteoStanice
         /// Returns true immediately when the setup button is pressed during boot.
         /// </summary>
         public bool IsPressedAtBoot()
+        {
+            return _initialized && IsPressed();
+        }
+
+        /// <summary>
+        /// Returns true while the setup button is physically pressed.
+        /// </summary>
+        public bool IsSetupPressed()
         {
             return _initialized && IsPressed();
         }
@@ -69,7 +80,20 @@ namespace MeteoStanice
 
             if (_ignoreUntilReleased)
             {
+                if (!IsPressed())
+                {
+                    _ignoreUntilReleased = false;
+                    _requestConsumed = IsBlocked();
+                }
+
                 return false;
+            }
+
+            if (_requestLatched && !_requestConsumed)
+            {
+                _requestLatched = false;
+                _requestConsumed = true;
+                return true;
             }
 
             if (!_requestConsumed)
@@ -157,6 +181,31 @@ namespace MeteoStanice
 
             _blockedUntilTicks = 0;
             return false;
+        }
+
+        private void StartMonitor()
+        {
+            if (_monitorStarted)
+            {
+                return;
+            }
+
+            _monitorStarted = true;
+            Thread monitor = new Thread(MonitorButton);
+            monitor.Start();
+        }
+
+        private void MonitorButton()
+        {
+            while (true)
+            {
+                if (_initialized && !_ignoreUntilReleased && !IsBlocked() && IsPressed())
+                {
+                    _requestLatched = true;
+                }
+
+                Thread.Sleep(20);
+            }
         }
 
         private bool IsPressed()

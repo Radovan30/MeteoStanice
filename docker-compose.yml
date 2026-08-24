@@ -30,6 +30,7 @@ services:
       ASPNETCORE_ENVIRONMENT: Development
       ASPNETCORE_URLS: http://+:8080
       ConnectionStrings__MeteoDatabase: Host=postgres;Port=5432;Database=meteostanice;Username=meteo;Password=meteo
+      StationApi__ApiKey: meteo-local-key
     ports:
       - "5080:8080"
 

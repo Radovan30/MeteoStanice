@@ -503,7 +503,8 @@ namespace MeteoStanice
             StationConfiguration configuration = CloneConfiguration(_baseConfiguration);
             configuration.WifiSsid = GetValue(values, "ssid");
             configuration.WifiPassword = GetValue(values, "password");
-            configuration.ApiBaseUrl = GetValue(values, "api");
+            configuration.ApiBaseUrl = StationConfigurationService.NormalizeApiBaseUrl(GetValue(values, "api"));
+            configuration.ApiKey = GetValue(values, "apiKey");
 
             if (configuration.WifiSsid == null || configuration.WifiSsid.Length == 0)
             {
@@ -751,11 +752,12 @@ namespace MeteoStanice
                 + ".row{display:flex;align-items:center;gap:8px;margin-top:10px}.row input{width:auto;margin:0}.btn,a.btn{display:inline-block;margin-top:14px;padding:10px 12px;border-radius:6px;background:#1f8cff;color:white;text-decoration:none;border:0}"
                 + ".msg{margin-top:12px;color:#ffd166}.hint{font-size:12px;color:#90a0b4;margin-top:12px}.current{font-size:12px;color:#cbd6e2;line-height:1.5;margin:10px 0 4px}</style>"
                 + "</head><body><div class=\"wrap\"><h1>MeteoStanice</h1><p class=\"sub\">Nastaveni Wi-Fi a serveru</p><div class=\"box\"><form method=\"post\" action=\"/\">"
-                + "<div class=\"current\">Aktualne: SSID " + HtmlEncode(DisplayValue(_baseConfiguration.WifiSsid)) + "<br>Heslo " + PasswordState(_baseConfiguration.WifiPassword) + "<br>API " + HtmlEncode(DisplayValue(_baseConfiguration.ApiBaseUrl)) + "<br>DHCP " + (_baseConfiguration.UseDhcp ? "zapnuto" : "vypnuto") + "<br>Mereni " + _baseConfiguration.MeasurementIntervalMinutes + " min, vzorek " + _baseConfiguration.SamplePeriodSeconds + " s<br>Lokace " + HtmlEncode(DisplayValue(_baseConfiguration.LocationText)) + "</div>"
+                + "<div class=\"current\">Aktualne: SSID " + HtmlEncode(DisplayValue(_baseConfiguration.WifiSsid)) + "<br>Heslo " + PasswordState(_baseConfiguration.WifiPassword) + "<br>API " + HtmlEncode(DisplayValue(_baseConfiguration.ApiBaseUrl)) + "<br>API klic " + PasswordState(_baseConfiguration.ApiKey) + "<br>DHCP " + (_baseConfiguration.UseDhcp ? "zapnuto" : "vypnuto") + "<br>Mereni " + _baseConfiguration.MeasurementIntervalMinutes + " min, vzorek " + _baseConfiguration.SamplePeriodSeconds + " s<br>Lokace " + HtmlEncode(DisplayValue(_baseConfiguration.LocationText)) + "</div>"
                 + "<a class=\"btn\" href=\"/scan\">Vybrat Wi-Fi</a>"
                 + Field("ssid", "Wi-Fi SSID", _baseConfiguration.WifiSsid, "text")
                 + Field("password", "Wi-Fi heslo", _baseConfiguration.WifiPassword, "password")
                 + Field("api", "API URL", _baseConfiguration.ApiBaseUrl, "text")
+                + Field("apiKey", "API klic", _baseConfiguration.ApiKey, "password")
                 + "<label class=\"row\"><input type=\"checkbox\" name=\"dhcp\" " + (_baseConfiguration.UseDhcp ? "checked" : "") + "> DHCP</label>"
                 + Field("ip", "Staticka IP", _baseConfiguration.StaticIpAddress, "text")
                 + Field("gateway", "Brana", _baseConfiguration.GatewayAddress, "text")
@@ -779,7 +781,7 @@ namespace MeteoStanice
                 + ".box{border:1px solid #2d3b4c;border-radius:8px;padding:16px;background:#151d28}.status{font-size:26px;font-weight:bold;color:" + color + ";margin:0 0 8px}"
                 + "p{line-height:1.45}.current{font-size:13px;color:#cbd6e2;line-height:1.6;margin:12px 0}.btn{display:inline-block;margin-top:12px;padding:10px 12px;border-radius:6px;background:#1f8cff;color:white;text-decoration:none}</style>"
                 + "</head><body><div class=\"wrap\"><div class=\"box\"><div class=\"status\">" + title + "</div><p>" + HtmlEncode(message) + "</p>"
-                + "<div class=\"current\">SSID: " + HtmlEncode(DisplayValue(_baseConfiguration.WifiSsid)) + "<br>Heslo: " + PasswordState(_baseConfiguration.WifiPassword) + "<br>API: " + HtmlEncode(DisplayValue(_baseConfiguration.ApiBaseUrl)) + "<br>DHCP: " + (_baseConfiguration.UseDhcp ? "zapnuto" : "vypnuto") + "<br>Mereni: " + _baseConfiguration.MeasurementIntervalMinutes + " min, vzorek " + _baseConfiguration.SamplePeriodSeconds + " s<br>Lokace: " + HtmlEncode(DisplayValue(_baseConfiguration.LocationText)) + "</div>"
+                + "<div class=\"current\">SSID: " + HtmlEncode(DisplayValue(_baseConfiguration.WifiSsid)) + "<br>Heslo: " + PasswordState(_baseConfiguration.WifiPassword) + "<br>API: " + HtmlEncode(DisplayValue(_baseConfiguration.ApiBaseUrl)) + "<br>API klic: " + PasswordState(_baseConfiguration.ApiKey) + "<br>DHCP: " + (_baseConfiguration.UseDhcp ? "zapnuto" : "vypnuto") + "<br>Mereni: " + _baseConfiguration.MeasurementIntervalMinutes + " min, vzorek " + _baseConfiguration.SamplePeriodSeconds + " s<br>Lokace: " + HtmlEncode(DisplayValue(_baseConfiguration.LocationText)) + "</div>"
                 + "<a class=\"btn\" href=\"/\">Zpet do nastaveni</a></div></div></body></html>";
         }
 
@@ -950,6 +952,7 @@ namespace MeteoStanice
             configuration.WifiSsid = source.WifiSsid;
             configuration.WifiPassword = source.WifiPassword;
             configuration.ApiBaseUrl = source.ApiBaseUrl;
+            configuration.ApiKey = source.ApiKey;
             configuration.UseDhcp = source.UseDhcp;
             configuration.StaticIpAddress = source.StaticIpAddress;
             configuration.GatewayAddress = source.GatewayAddress;
@@ -998,6 +1001,7 @@ namespace MeteoStanice
             bool verified = SameValue(configuration.WifiSsid, verifyConfiguration.WifiSsid)
                 && SameValue(configuration.WifiPassword, verifyConfiguration.WifiPassword)
                 && SameValue(configuration.ApiBaseUrl, verifyConfiguration.ApiBaseUrl)
+                && SameValue(configuration.ApiKey, verifyConfiguration.ApiKey)
                 && SameValue(configuration.LocationText, verifyConfiguration.LocationText);
             Debug.WriteLine("Provisioning save verify SSID=" + (verifyConfiguration.WifiSsid == string.Empty ? "<nenastaveno>" : verifyConfiguration.WifiSsid)
                 + ", location=" + (verifyConfiguration.LocationText == string.Empty ? "<nenastaveno>" : verifyConfiguration.LocationText)

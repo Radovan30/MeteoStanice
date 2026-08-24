@@ -31,6 +31,7 @@
     <Compile Include="NanoFriendlyMeasurement.cs" />
     <Compile Include="NanoFriendlySensors.cs" />
     <Compile Include="NanoRealSensors.cs" />
+    <Compile Include="NanoRunningStatistics.cs" />
     <Compile Include="NanoMeasurementCycle.cs" />
     <Compile Include="NanoMeasurementQueue.cs" />
     <Compile Include="NanoMeasurementUpload.cs" />

@@ -9,6 +9,7 @@ namespace MeteoStanice
     {
         private readonly Queue _items;
         private readonly int _capacity;
+        private int _droppedCount;
 
         /// <summary>
         /// Creates a RAM queue with fixed capacity.
@@ -37,6 +38,14 @@ namespace MeteoStanice
             }
         }
 
+        public int DroppedCount
+        {
+            get
+            {
+                return _droppedCount;
+            }
+        }
+
         /// <summary>
         /// Adds one measurement record when there is free capacity.
         /// </summary>
@@ -44,6 +53,11 @@ namespace MeteoStanice
         {
             if (record == null || _items.Count >= _capacity)
             {
+                if (record != null)
+                {
+                    _droppedCount++;
+                }
+
                 return false;
             }
 

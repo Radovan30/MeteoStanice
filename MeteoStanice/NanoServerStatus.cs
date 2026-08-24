@@ -56,9 +56,9 @@ namespace MeteoStanice
         public NanoServerStatus Check(StationConfiguration configuration, bool wifiConnected, string stationId)
         {
             NanoServerStatus status = new NanoServerStatus();
-            status.ApiBaseUrl = configuration.ApiBaseUrl;
+            status.ApiBaseUrl = StationConfigurationService.NormalizeApiBaseUrl(configuration.ApiBaseUrl);
 
-            if (configuration.ApiBaseUrl == null || configuration.ApiBaseUrl.Length == 0)
+            if (status.ApiBaseUrl == null || status.ApiBaseUrl.Length == 0)
             {
                 status.State = NanoServerConnectionState.NotConfigured;
                 status.Message = "API URL neni nastavena, server test preskocen.";
@@ -76,9 +76,8 @@ namespace MeteoStanice
             }
 
             status.State = NanoServerConnectionState.ReadyForCheck;
-            status.Message = "API URL je nastavena, spoustim HTTP health check.";
+            status.Message = "API URL je nastavena, health check pri startu preskocen.";
             Debug.WriteLine("Server: " + status.Message + " URL=" + status.ApiBaseUrl);
-            RunHealthCheck(status, stationId);
             return status;
         }
 
