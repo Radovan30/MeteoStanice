@@ -140,7 +140,7 @@ namespace MeteoStanice
         public NanoMeasurementCycle(NanoSensorReader sensorReader)
         {
             _sensorReader = sensorReader;
-            Reset(DateTime.UtcNow);
+            Reset(AlignIntervalStart(DateTime.UtcNow, 10));
         }
 
         // Number of samples collected in the currently open interval.
@@ -174,6 +174,7 @@ namespace MeteoStanice
         /// </summary>
         public bool TryRunMeasurementStep(StationConfiguration configuration, string stationId, NanoPowerState powerState, out NanoMeasurementRecord record)
         {
+            EnsureAlignedOpenInterval(configuration, DateTime.UtcNow);
             bool batteryActive = powerState != null && powerState.BatteryActive;
             NanoSensorReadSet sample = _sensorReader.ReadCurrentSample(batteryActive);
             _lastReadSet = sample;
@@ -212,6 +213,31 @@ namespace MeteoStanice
         {
             int intervalMinutes = configuration.MeasurementIntervalMinutes < 1 ? 10 : configuration.MeasurementIntervalMinutes;
             return _intervalStartedAt.AddMinutes(intervalMinutes);
+        }
+
+        private void EnsureAlignedOpenInterval(StationConfiguration configuration, DateTime now)
+        {
+            int intervalMinutes = configuration.MeasurementIntervalMinutes < 1 ? 10 : configuration.MeasurementIntervalMinutes;
+            DateTime alignedStart = AlignIntervalStart(now, intervalMinutes);
+            DateTime alignedEnd = alignedStart.AddMinutes(intervalMinutes);
+
+            if (_sampleCount == 0)
+            {
+                if (_intervalStartedAt != alignedStart)
+                {
+                    _intervalStartedAt = alignedStart;
+                    Debug.WriteLine("Interval zarovnan na casovou hranici od " + _intervalStartedAt + " do " + alignedEnd + ".");
+                }
+
+                return;
+            }
+
+            DateTime currentEnd = _intervalStartedAt.AddMinutes(intervalMinutes);
+            if (now < _intervalStartedAt || now >= currentEnd.AddMinutes(intervalMinutes))
+            {
+                Debug.WriteLine("Cas se posunul mimo otevreny interval, zacinam nove zarovnane okno od " + alignedStart + " do " + alignedEnd + ".");
+                Reset(alignedStart);
+            }
         }
 
         private void AddSample(NanoSensorReadSet sample, NanoPowerState powerState)
@@ -439,6 +465,18 @@ namespace MeteoStanice
             _sps30BatterySkippedCount = 0;
             _status = MeasurementStatus.Ok;
             _intervalStartedAt = startedAt;
+        }
+
+        private static DateTime AlignIntervalStart(DateTime utcTime, int intervalMinutes)
+        {
+            if (intervalMinutes < 1)
+            {
+                intervalMinutes = 10;
+            }
+
+            long intervalTicks = TimeSpan.TicksPerMinute * intervalMinutes;
+            long alignedTicks = (utcTime.Ticks / intervalTicks) * intervalTicks;
+            return new DateTime(alignedTicks);
         }
 
         private static double Average(double sum, int count)

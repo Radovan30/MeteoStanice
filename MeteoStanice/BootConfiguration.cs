@@ -52,7 +52,7 @@ namespace MeteoStanice
         public string ProvisioningPassword { get; set; }
         // Local web address used by the setup portal.
         public string ProvisioningAddress { get; set; }
-        // Friendly setup host name reserved for local DNS or mDNS.
+        // Legacy friendly setup host name kept for saved configuration compatibility.
         public string ProvisioningHostName { get; set; }
         // Setup window length after boot.
         public int ProvisioningWindowMilliseconds { get; set; }
@@ -84,6 +84,8 @@ namespace MeteoStanice
     {
         // Default setup window length after boot.
         private const int DefaultProvisioningWindowMilliseconds = 60000;
+        private const string DefaultProvisioningPassword = "12345678";
+        private const string DefaultProvisioningAddress = "192.168.4.1";
 
         private readonly IStationConfigurationStore _configurationStore;
 
@@ -110,11 +112,32 @@ namespace MeteoStanice
                     Debug.WriteLine("Provisioning okno aktualizovano na 60000 ms.");
                 }
 
-                if (configuration.ProvisioningHostName == null || configuration.ProvisioningHostName.Length == 0)
+                if (configuration.ProvisioningAccessPointName == null || configuration.ProvisioningAccessPointName.Length == 0)
                 {
-                    configuration.ProvisioningHostName = "meteo";
+                    configuration.ProvisioningAccessPointName = BoardProfile.ProvisioningAccessPointName;
                     _configurationStore.Save(configuration);
-                    Debug.WriteLine("Provisioning alias aktualizovan na http://meteo/.");
+                    Debug.WriteLine("Setup SSID doplneno do konfigurace.");
+                }
+
+                if (configuration.ProvisioningPassword == null || configuration.ProvisioningPassword.Length < 8)
+                {
+                    configuration.ProvisioningPassword = DefaultProvisioningPassword;
+                    _configurationStore.Save(configuration);
+                    Debug.WriteLine("Setup heslo opraveno na vychozi hodnotu.");
+                }
+
+                if (configuration.ProvisioningAddress == null || configuration.ProvisioningAddress.Length == 0)
+                {
+                    configuration.ProvisioningAddress = DefaultProvisioningAddress;
+                    _configurationStore.Save(configuration);
+                    Debug.WriteLine("Setup IP adresa doplnena do konfigurace.");
+                }
+
+                if (IsUnknownHardwareId(configuration.DeviceHardwareId))
+                {
+                    configuration.DeviceHardwareId = CreateHardwareId();
+                    _configurationStore.Save(configuration);
+                    Debug.WriteLine("Device hardware ID vytvoren a ulozen: " + configuration.DeviceHardwareId);
                 }
 
                 if (configuration.StationGuid == null || configuration.StationGuid.Length == 0)
@@ -147,7 +170,7 @@ namespace MeteoStanice
             StationConfiguration configuration = new StationConfiguration();
             configuration.StationId = "METEO-TEST-001";
             configuration.StationGuid = CreateStationGuid();
-            configuration.DeviceHardwareId = BoardProfile.HardwareIdPrefix + "-UNKNOWN";
+            configuration.DeviceHardwareId = CreateHardwareId();
             configuration.StationName = "XIAO ESP32C3 meteostanice";
             configuration.FirmwareVersion = "0.1.0-test";
             configuration.WifiSsid = string.Empty;
@@ -165,8 +188,8 @@ namespace MeteoStanice
             configuration.EventUploadsPerCycle = 4;
             configuration.LocationText = string.Empty;
             configuration.ProvisioningAccessPointName = BoardProfile.ProvisioningAccessPointName;
-            configuration.ProvisioningPassword = "12345678";
-            configuration.ProvisioningAddress = "192.168.4.1";
+            configuration.ProvisioningPassword = DefaultProvisioningPassword;
+            configuration.ProvisioningAddress = DefaultProvisioningAddress;
             configuration.ProvisioningHostName = "meteo";
             configuration.ProvisioningWindowMilliseconds = DefaultProvisioningWindowMilliseconds;
             configuration.ProvisioningRequestedOnNextBoot = false;
@@ -286,6 +309,18 @@ namespace MeteoStanice
         {
             return Guid.NewGuid().ToString();
         }
+
+        private static string CreateHardwareId()
+        {
+            return BoardProfile.HardwareIdPrefix + "-" + Guid.NewGuid().ToString();
+        }
+
+        private static bool IsUnknownHardwareId(string hardwareId)
+        {
+            return hardwareId == null
+                || hardwareId.Length == 0
+                || hardwareId == BoardProfile.HardwareIdPrefix + "-UNKNOWN";
+        }
     }
 
     /// <summary>
@@ -322,7 +357,6 @@ namespace MeteoStanice
             Debug.WriteLine("Setup Wi-Fi SSID: " + configuration.ProvisioningAccessPointName);
             Debug.WriteLine("Setup heslo/PIN: " + configuration.ProvisioningPassword);
             Debug.WriteLine("Setup web: http://" + configuration.ProvisioningAddress + "/");
-            Debug.WriteLine("Setup alias: http://" + configuration.ProvisioningHostName + "/");
             Debug.WriteLine("Meteo Wi-Fi: " + (configuration.WifiSsid == string.Empty ? "<nenastaveno>" : configuration.WifiSsid));
             Debug.WriteLine("Meteo IP: " + (configuration.UseDhcp ? "DHCP" : configuration.StaticIpAddress));
             Debug.WriteLine("Mereni interval: " + configuration.MeasurementIntervalMinutes + " min.");

@@ -8,12 +8,12 @@ public sealed class MeasurementQualityFlag
     /// <summary>
     /// Database identifier.
     /// </summary>
-    public long Id { get; set; }
+    public Guid Id { get; set; } = Guid.NewGuid();
 
     /// <summary>
     /// Measurement identifier.
     /// </summary>
-    public long MeasurementId { get; set; }
+    public Guid MeasurementId { get; set; }
 
     /// <summary>
     /// Measurement that owns the flag.

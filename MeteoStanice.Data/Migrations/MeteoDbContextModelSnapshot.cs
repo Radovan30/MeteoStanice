@@ -24,11 +24,9 @@ namespace MeteoStanice.Data.Migrations
 
             modelBuilder.Entity("MeteoStanice.Data.Entities.DeviceEvent", b =>
                 {
-                    b.Property<long>("Id")
+                    b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("bigint");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+                        .HasColumnType("uuid");
 
                     b.Property<string>("Category")
                         .IsRequired()
@@ -67,8 +65,8 @@ namespace MeteoStanice.Data.Migrations
                         .HasMaxLength(32)
                         .HasColumnType("character varying(32)");
 
-                    b.Property<long>("StationId")
-                        .HasColumnType("bigint");
+                    b.Property<Guid>("StationId")
+                        .HasColumnType("uuid");
 
                     b.HasKey("Id");
 
@@ -80,11 +78,9 @@ namespace MeteoStanice.Data.Migrations
 
             modelBuilder.Entity("MeteoStanice.Data.Entities.Measurement", b =>
                 {
-                    b.Property<long>("Id")
+                    b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("bigint");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+                        .HasColumnType("uuid");
 
                     b.Property<double?>("BatteryVoltage")
                         .HasColumnType("double precision");
@@ -202,8 +198,8 @@ namespace MeteoStanice.Data.Migrations
                     b.Property<int>("Sps30WaitCount")
                         .HasColumnType("integer");
 
-                    b.Property<long>("StationId")
-                        .HasColumnType("bigint");
+                    b.Property<Guid>("StationId")
+                        .HasColumnType("uuid");
 
                     b.Property<string>("Status")
                         .IsRequired()
@@ -237,17 +233,15 @@ namespace MeteoStanice.Data.Migrations
 
             modelBuilder.Entity("MeteoStanice.Data.Entities.MeasurementQualityFlag", b =>
                 {
-                    b.Property<long>("Id")
+                    b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("bigint");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+                        .HasColumnType("uuid");
 
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
-                    b.Property<long>("MeasurementId")
-                        .HasColumnType("bigint");
+                    b.Property<Guid>("MeasurementId")
+                        .HasColumnType("uuid");
 
                     b.Property<string>("Message")
                         .IsRequired()
@@ -348,11 +342,9 @@ namespace MeteoStanice.Data.Migrations
 
             modelBuilder.Entity("MeteoStanice.Data.Entities.Station", b =>
                 {
-                    b.Property<long>("Id")
+                    b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("bigint");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+                        .HasColumnType("uuid");
 
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
@@ -404,11 +396,9 @@ namespace MeteoStanice.Data.Migrations
 
             modelBuilder.Entity("MeteoStanice.Data.Entities.StationSetting", b =>
                 {
-                    b.Property<long>("Id")
+                    b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("bigint");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+                        .HasColumnType("uuid");
 
                     b.Property<string>("LocationText")
                         .IsRequired()
@@ -421,8 +411,8 @@ namespace MeteoStanice.Data.Migrations
                     b.Property<int>("SamplePeriodSeconds")
                         .HasColumnType("integer");
 
-                    b.Property<long>("StationId")
-                        .HasColumnType("bigint");
+                    b.Property<Guid>("StationId")
+                        .HasColumnType("uuid");
 
                     b.Property<DateTimeOffset>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");

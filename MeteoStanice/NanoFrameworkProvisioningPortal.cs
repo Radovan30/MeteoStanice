@@ -16,11 +16,13 @@ namespace MeteoStanice
     public sealed class NanoFrameworkProvisioningPortal : IProvisioningPortal
     {
         private const string SubnetMask = "255.255.255.0";
+        private const int AccessPointAddressTimeoutMilliseconds = 3000;
+        private const int SocketRetryDelayMilliseconds = 1000;
+        private const int HttpRequestBufferSize = 8192;
 
         private Socket _serverSocket;
         private Thread _serverThread;
         private DhcpServer _dhcpServer;
-        private NanoDnsResponder _dnsResponder;
         private readonly IStationConfigurationStore _configurationStore;
         private readonly StationConfigurationService _configurationService;
         private StationConfiguration _baseConfiguration;
@@ -49,42 +51,50 @@ namespace MeteoStanice
         /// </summary>
         public bool Start(StationConfiguration configuration)
         {
+            if (_serverThread != null && _serverThread.IsAlive)
+            {
+                Debug.WriteLine("Provisioning predchozi web vlakno jeste bezi.");
+                return false;
+            }
             _baseConfiguration = CloneConfiguration(configuration);
             _result = new ProvisioningWindowResult();
             _running = true;
 
-            if (!ConfigureAccessPoint(configuration))
+            try
             {
-                Debug.WriteLine("SoftAP konfigurace se nepodarila pripravit.");
+                if (!ConfigureAccessPoint(configuration))
+                {
+                    Debug.WriteLine("SoftAP konfigurace se nepodarila pripravit.");
+                    Stop();
+                    return false;
+                }
+
+                Thread.Sleep(1000);
+
+                IPAddress provisioningAddress = IPAddress.Parse(configuration.ProvisioningAddress);
+                _dhcpServer = new DhcpServer();
+                _dhcpServer.CaptivePortalUrl = "http://" + configuration.ProvisioningAddress + "/";
+                _dhcpServer.Gateway = provisioningAddress;
+                if (!_dhcpServer.Start(provisioningAddress, IPAddress.Parse(SubnetMask)))
+                {
+                    Debug.WriteLine("DHCP server pro provisioning se nepodarilo spustit.");
+                    Stop();
+                    return false;
+                }
+                Debug.WriteLine("Provisioning DHCP server bezi na " + configuration.ProvisioningAddress + ".");
+
+                _serverThread = new Thread(RunServer);
+                _serverThread.Start();
+
+                Debug.WriteLine("Provisioning portal bezi na http://" + configuration.ProvisioningAddress + "/");
+                return true;
+            }
+            catch (System.Exception exception)
+            {
+                Debug.WriteLine("Provisioning portal start selhal: " + exception.Message);
+                Stop();
                 return false;
             }
-
-            Thread.Sleep(1000);
-
-            IPAddress provisioningAddress = IPAddress.Parse(configuration.ProvisioningAddress);
-            _dhcpServer = new DhcpServer();
-            _dhcpServer.CaptivePortalUrl = "http://" + configuration.ProvisioningHostName + "/";
-            _dhcpServer.DnsServer = provisioningAddress;
-            _dhcpServer.Gateway = provisioningAddress;
-            if (!_dhcpServer.Start(provisioningAddress, IPAddress.Parse(SubnetMask)))
-            {
-                Debug.WriteLine("DHCP server pro provisioning se nepodarilo spustit.");
-                return false;
-            }
-
-            _dnsResponder = new NanoDnsResponder();
-            _dnsResponder.Start(configuration.ProvisioningHostName, configuration.ProvisioningAddress);
-
-            _serverSocket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-            _serverSocket.Bind(new IPEndPoint(IPAddress.Any, 80));
-            _serverSocket.Listen(2);
-            Debug.WriteLine("Provisioning raw web socket pripraven na portu 80.");
-            _serverThread = new Thread(RunServer);
-            _serverThread.Start();
-
-            Debug.WriteLine("Provisioning portal bezi na http://" + configuration.ProvisioningAddress + "/");
-            Debug.WriteLine("Provisioning portal alias bezi na http://" + configuration.ProvisioningHostName + "/");
-            return true;
         }
 
         /// <summary>
@@ -139,11 +149,23 @@ namespace MeteoStanice
         {
             int elapsed = 0;
             int nextLog = 0;
+            bool setupButtonReleased = buttons == null || !buttons.IsSetupPressed();
 
             while (true)
             {
-                if (buttons != null && buttons.ConsumeSetupRequest())
+                bool setupButtonPressed = buttons != null && buttons.IsSetupPressed();
+                if (!setupButtonReleased)
                 {
+                    setupButtonReleased = !setupButtonPressed;
+                }
+                else if (setupButtonPressed)
+                {
+                    Thread.Sleep(40);
+                    if (!buttons.IsSetupPressed())
+                    {
+                        continue;
+                    }
+
                     _running = false;
                     if (_result == null)
                     {
@@ -179,28 +201,54 @@ namespace MeteoStanice
         public void Stop()
         {
             _running = false;
-            Thread.Sleep(600);
 
             if (_serverSocket != null)
             {
-                _serverSocket.Close();
-                _serverSocket = null;
+                try
+                {
+                    _serverSocket.Close();
+                }
+                catch (System.Exception exception)
+                {
+                    Debug.WriteLine("Provisioning web socket stop selhal: " + exception.Message);
+                }
+                finally
+                {
+                    _serverSocket = null;
+                }
             }
 
             if (_dhcpServer != null)
             {
-                _dhcpServer.Stop();
-                _dhcpServer.Dispose();
-                _dhcpServer = null;
+                try
+                {
+                    _dhcpServer.Stop();
+                    _dhcpServer.Dispose();
+                }
+                catch (System.Exception exception)
+                {
+                    Debug.WriteLine("Provisioning DHCP stop selhal: " + exception.Message);
+                }
+                finally
+                {
+                    _dhcpServer = null;
+                }
             }
 
-            if (_dnsResponder != null)
+            try
             {
-                _dnsResponder.Stop();
-                _dnsResponder = null;
+                DisableAccessPointConfiguration();
             }
-
-            DisableAccessPointConfiguration();
+            finally
+            {
+                if (_serverThread != null && _serverThread.IsAlive)
+                {
+                    if (!_serverThread.Join(5000))
+                    {
+                        Debug.WriteLine("Provisioning web vlakno se dosud neukoncilo.");
+                    }
+                }
+            }
         }
 
         private bool ConfigureAccessPoint(StationConfiguration configuration)
@@ -219,20 +267,6 @@ namespace MeteoStanice
                 return false;
             }
 
-            if (accessPointConfiguration.Options == WirelessAPConfiguration.ConfigurationOptions.Enable
-                && accessPointConfiguration.Ssid == configuration.ProvisioningAccessPointName
-                && accessPointConfiguration.Password == configuration.ProvisioningPassword)
-            {
-                if (networkInterface.IPv4Address != configuration.ProvisioningAddress)
-                {
-                    networkInterface.EnableStaticIPv4(configuration.ProvisioningAddress, SubnetMask, configuration.ProvisioningAddress);
-                    Debug.WriteLine("SoftAP IPv4 znovu nastaveno bez vynuceneho restartu.");
-                }
-
-                Debug.WriteLine("SoftAP konfigurace je pripravena.");
-                return true;
-            }
-
             networkInterface.EnableStaticIPv4(configuration.ProvisioningAddress, SubnetMask, configuration.ProvisioningAddress);
             accessPointConfiguration.Options = WirelessAPConfiguration.ConfigurationOptions.Enable;
             accessPointConfiguration.Ssid = configuration.ProvisioningAccessPointName;
@@ -240,8 +274,38 @@ namespace MeteoStanice
             accessPointConfiguration.Authentication = System.Net.NetworkInformation.AuthenticationType.WPA2;
             accessPointConfiguration.Password = configuration.ProvisioningPassword;
             accessPointConfiguration.SaveConfiguration();
-            Debug.WriteLine("SoftAP konfigurace ulozena a povolena pro okamzity setup bez AutoStart.");
-            return true;
+            Debug.WriteLine("SoftAP konfigurace ulozena a povolena pro okamzity setup bez AutoStart, password length="
+                + (configuration.ProvisioningPassword == null ? 0 : configuration.ProvisioningPassword.Length) + ".");
+            return EnsureAccessPointAddress(configuration.ProvisioningAddress);
+        }
+
+        private static bool EnsureAccessPointAddress(string provisioningAddress)
+        {
+            int elapsed = 0;
+            while (elapsed < AccessPointAddressTimeoutMilliseconds)
+            {
+                NetworkInterface networkInterface = GetAccessPointInterface();
+                if (networkInterface != null)
+                {
+                    if (networkInterface.IPv4Address != provisioningAddress)
+                    {
+                        networkInterface.EnableStaticIPv4(provisioningAddress, SubnetMask, provisioningAddress);
+                    }
+
+                    networkInterface = GetAccessPointInterface();
+                    if (networkInterface != null && networkInterface.IPv4Address == provisioningAddress)
+                    {
+                        Debug.WriteLine("SoftAP pripraven, IP=" + networkInterface.IPv4Address + ".");
+                        return true;
+                    }
+                }
+
+                Thread.Sleep(100);
+                elapsed += 100;
+            }
+
+            Debug.WriteLine("SoftAP nema ocekavanou IP " + provisioningAddress + ".");
+            return false;
         }
 
         private static void DisableAccessPointConfiguration()
@@ -260,15 +324,15 @@ namespace MeteoStanice
                 return;
             }
 
-            if (accessPointConfiguration.Options == WirelessAPConfiguration.ConfigurationOptions.None)
+            if (accessPointConfiguration.Options == WirelessAPConfiguration.ConfigurationOptions.Disable)
             {
                 Debug.WriteLine("SoftAP uz je vypnuty.");
                 return;
             }
 
-            accessPointConfiguration.Options = WirelessAPConfiguration.ConfigurationOptions.None;
+            accessPointConfiguration.Options = WirelessAPConfiguration.ConfigurationOptions.Disable;
             accessPointConfiguration.SaveConfiguration();
-            Debug.WriteLine("SoftAP AutoStart vypnut.");
+            Debug.WriteLine("SoftAP explicitne vypnut.");
         }
 
         private static NetworkInterface GetAccessPointInterface()
@@ -292,35 +356,92 @@ namespace MeteoStanice
 
         private void RunServer()
         {
-            try
+            int failures = 0;
+            while (_running)
             {
-                Debug.WriteLine("Provisioning raw web server posloucha na portu 80.");
-                while (_running && _serverSocket != null)
+                Socket listener = null;
+                try
                 {
-                    if (!_serverSocket.Poll(500000, SelectMode.SelectRead))
+                    listener = OpenServerSocket();
+                    if (listener == null)
                     {
+                        Thread.Sleep(SocketRetryDelayMilliseconds);
                         continue;
                     }
 
-                    Socket client = _serverSocket.Accept();
-                    if (client != null)
+                    Debug.WriteLine("Provisioning raw web server posloucha na portu 80.");
+                    failures = 0;
+                    while (_running)
                     {
-                        Debug.WriteLine("Provisioning TCP klient pripojen.");
-                        ProcessRequest(client);
+                        Socket client = listener.Accept();
+                        if (client != null)
+                        {
+                            Debug.WriteLine("Provisioning TCP klient pripojen.");
+                            try
+                            {
+                                ProcessRequest(client);
+                            }
+                            finally
+                            {
+                                try { client.Close(); } catch { }
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    if (!_running) break;
+                    SocketException socketError = ex as SocketException;
+                    Debug.WriteLine("Provisioning web socket chyba: " + ex.Message
+                        + (socketError == null ? string.Empty : ", code=" + socketError.ErrorCode));
+                    if (++failures >= 3)
+                    {
+                        Debug.WriteLine("Provisioning web socket stale neni pripraven, zkusim ho znovu otevrit.");
+                        failures = 0;
+                    }
+                    Thread.Sleep(SocketRetryDelayMilliseconds);
+                }
+                finally
+                {
+                    if (listener != null)
+                    {
+                        try { listener.Close(); } catch { }
+                        if (_serverSocket == listener)
+                        {
+                            _serverSocket = null;
+                        }
                     }
                 }
             }
-            catch (Exception ex)
+            Debug.WriteLine("Provisioning web vlakno ukonceno.");
+        }
+
+        private Socket OpenServerSocket()
+        {
+            try
             {
-                Debug.WriteLine("Provisioning web server skoncil: " + ex.Message);
+                Socket listener = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+                listener.Bind(new IPEndPoint(IPAddress.Any, 80));
+                listener.Listen(2);
+                _serverSocket = listener;
+                Debug.WriteLine("Provisioning raw web socket pripraven na portu 80.");
+                return listener;
+            }
+            catch (Exception exception)
+            {
+                Debug.WriteLine("Provisioning web socket nelze otevrit: " + exception.Message);
+                return null;
             }
         }
 
         private void ProcessRequest(Socket client)
         {
+            string stage = "start";
             try
             {
                 client.ReceiveTimeout = 2000;
+                client.SendTimeout = 2000;
+                stage = "read";
                 string rawRequest = ReadHttpRequest(client);
                 if (rawRequest.Length == 0)
                 {
@@ -329,6 +450,7 @@ namespace MeteoStanice
                 }
 
                 Debug.WriteLine("Provisioning HTTP chars: " + rawRequest.Length);
+                stage = "route";
                 string requestLine = GetRequestLine(rawRequest);
                 string method = GetRequestMethod(requestLine);
                 string path = GetRequestPath(requestLine);
@@ -349,20 +471,24 @@ namespace MeteoStanice
 
                 if (method == "POST")
                 {
+                    stage = "parse";
                     Hashtable values = ParseForm(GetRequestBody(rawRequest));
                     Debug.WriteLine("Provisioning POST keys: ssid=" + HasValue(values, "ssid")
                         + ", password=" + HasValue(values, "password")
                         + ", api=" + HasValue(values, "api")
                         + ", dhcp=" + HasValue(values, "dhcp")
                         + ", locationText=" + HasValue(values, "locationText"));
+                    stage = "build";
                     StationConfiguration newConfiguration = BuildConfiguration(values);
 
                     if (newConfiguration == null)
                     {
+                        stage = "response-invalid";
                         WriteHtml(client, CreateResultPage(false, "CHYBA", "Wi-Fi SSID nebo Wi-Fi heslo neni vyplnene. Nastaveni nebylo ulozeno."));
                         return;
                     }
 
+                    stage = "save";
                     _result.Configuration = newConfiguration;
                     _result.ConfigurationSaved = SaveSubmittedConfiguration(newConfiguration);
                     _result.TimedOut = false;
@@ -373,6 +499,7 @@ namespace MeteoStanice
                     }
 
                     Debug.WriteLine("Provisioning web ulozil SSID: " + (newConfiguration.WifiSsid == string.Empty ? "<nenastaveno>" : newConfiguration.WifiSsid) + ", saved=" + _result.ConfigurationSaved);
+                    stage = "response-saved";
                     WriteHtml(client, CreateResultPage(
                         _result.ConfigurationSaved,
                         _result.ConfigurationSaved ? "ULOZENO" : "CHYBA",
@@ -397,10 +524,10 @@ namespace MeteoStanice
             }
             catch (Exception exception)
             {
-                Debug.WriteLine("Provisioning HTTP request selhal: " + exception.Message);
+                Debug.WriteLine("Provisioning HTTP request selhal ve fazi " + stage + ": " + exception.GetType().FullName + " " + exception.Message);
                 try
                 {
-                    WriteText(client, "MeteoStanice provisioning chyba requestu.");
+                    WriteText(client, "MeteoStanice provisioning chyba requestu: " + stage + " " + exception.GetType().Name);
                 }
                 catch
                 {
@@ -417,17 +544,12 @@ namespace MeteoStanice
 
         private static string ReadHttpRequest(Socket client)
         {
-            byte[] buffer = new byte[4096];
+            byte[] buffer = new byte[HttpRequestBufferSize];
             int totalLength = 0;
             int expectedBodyLength = -1;
 
             while (totalLength < buffer.Length)
             {
-                if (!client.Poll(2000000, SelectMode.SelectRead))
-                {
-                    break;
-                }
-
                 int received = client.Receive(buffer, totalLength, buffer.Length - totalLength, SocketFlags.None);
                 if (received <= 0)
                 {
@@ -459,6 +581,8 @@ namespace MeteoStanice
                 return string.Empty;
             }
 
+            Debug.WriteLine("Provisioning HTTP request precten castecne, bytes=" + totalLength + "/" + buffer.Length
+                + ", expected body=" + expectedBodyLength + ".");
             return System.Text.Encoding.UTF8.GetString(buffer, 0, totalLength);
         }
 
@@ -675,9 +799,20 @@ namespace MeteoStanice
                 + "Cache-Control: no-store\r\n"
                 + "\r\n";
             byte[] headerBytes = System.Text.Encoding.UTF8.GetBytes(header);
-            client.Send(headerBytes);
-            client.Send(body);
+            SendAll(client, headerBytes);
+            SendAll(client, body);
             client.Close();
+        }
+
+        private static void SendAll(Socket client, byte[] bytes)
+        {
+            int offset = 0;
+            while (offset < bytes.Length)
+            {
+                int sent = client.Send(bytes, offset, bytes.Length - offset, SocketFlags.None);
+                if (sent <= 0) throw new Exception("HTTP spojeni uzavreno pri odesilani.");
+                offset += sent;
+            }
         }
 
         /// <summary>
@@ -779,9 +914,8 @@ namespace MeteoStanice
                 + "<title>MeteoStanice setup</title>"
                 + "<style>body{font-family:Arial,sans-serif;margin:0;background:#10151d;color:#edf2f7}.wrap{max-width:440px;margin:0 auto;padding:18px}"
                 + ".box{border:1px solid #2d3b4c;border-radius:8px;padding:16px;background:#151d28}.status{font-size:26px;font-weight:bold;color:" + color + ";margin:0 0 8px}"
-                + "p{line-height:1.45}.current{font-size:13px;color:#cbd6e2;line-height:1.6;margin:12px 0}.btn{display:inline-block;margin-top:12px;padding:10px 12px;border-radius:6px;background:#1f8cff;color:white;text-decoration:none}</style>"
+                + "p{line-height:1.45}.btn{display:inline-block;margin-top:12px;padding:10px 12px;border-radius:6px;background:#1f8cff;color:white;text-decoration:none}</style>"
                 + "</head><body><div class=\"wrap\"><div class=\"box\"><div class=\"status\">" + title + "</div><p>" + HtmlEncode(message) + "</p>"
-                + "<div class=\"current\">SSID: " + HtmlEncode(DisplayValue(_baseConfiguration.WifiSsid)) + "<br>Heslo: " + PasswordState(_baseConfiguration.WifiPassword) + "<br>API: " + HtmlEncode(DisplayValue(_baseConfiguration.ApiBaseUrl)) + "<br>API klic: " + PasswordState(_baseConfiguration.ApiKey) + "<br>DHCP: " + (_baseConfiguration.UseDhcp ? "zapnuto" : "vypnuto") + "<br>Mereni: " + _baseConfiguration.MeasurementIntervalMinutes + " min, vzorek " + _baseConfiguration.SamplePeriodSeconds + " s<br>Lokace: " + HtmlEncode(DisplayValue(_baseConfiguration.LocationText)) + "</div>"
                 + "<a class=\"btn\" href=\"/\">Zpet do nastaveni</a></div></div></body></html>";
         }
 

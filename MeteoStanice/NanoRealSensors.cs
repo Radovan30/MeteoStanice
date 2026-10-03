@@ -35,7 +35,6 @@ namespace MeteoStanice
         private bool _sps30Initialized;
         private bool _sps30Unavailable;
         private bool _bmp280Initialized;
-        private bool _bmp280Unavailable;
         private byte _bmp280Address;
         private byte _bmp280ChipId;
         private ushort _digT1;
@@ -92,6 +91,7 @@ namespace MeteoStanice
             }
             catch (Exception exception)
             {
+                ResetSht40("SHT40 read failed");
                 result.IsSuccess = false;
                 result.ErrorCode = SensorErrorCode.CommunicationFailed;
                 result.ErrorMessage = "SHT40 I2C cteni selhalo: " + exception.Message;
@@ -107,19 +107,13 @@ namespace MeteoStanice
             Bmp280ReadResult result = new Bmp280ReadResult();
             try
             {
-                if (_bmp280Unavailable)
-                {
-                    result.IsSuccess = false;
-                    result.ErrorCode = SensorErrorCode.NotDetected;
-                    result.ErrorMessage = "BMP280 nebyl detekovan na adrese 0x76 ani 0x77.";
-                    return result;
-                }
-
                 EnsureBus();
                 EnsureBmp280();
 
+                VerifyBmp280ChipId();
                 StartBmp280Measurement();
                 byte[] data = ReadBmp280Registers(Bmp280DataRegister, 6);
+                ValidateBmp280Data(data);
                 int adcPressure = ((data[0] << 12) | (data[1] << 4) | (data[2] >> 4));
                 int adcTemperature = ((data[3] << 12) | (data[4] << 4) | (data[5] >> 4));
                 int fineTemperature;
@@ -139,6 +133,7 @@ namespace MeteoStanice
             }
             catch (Exception exception)
             {
+                ResetBmp280("BMP280 read failed");
                 result.IsSuccess = false;
                 result.ErrorCode = SensorErrorCode.CommunicationFailed;
                 result.ErrorMessage = "BMP280 I2C cteni selhalo: " + exception.Message;
@@ -267,7 +262,7 @@ namespace MeteoStanice
 
             if (_bmp280 == null)
             {
-                _bmp280Unavailable = true;
+                ResetBmp280("BMP280 init failed");
                 throw new Exception("BMP280 nebyl detekovan.");
             }
 
@@ -294,12 +289,47 @@ namespace MeteoStanice
                     return device;
                 }
 
+                Debug.WriteLine("Device at 0x" + address.ToString("X2") + " is not BMP280, chipId=0x" + chipId.ToString("X2") + ".");
                 device.Dispose();
                 return null;
             }
-            catch
+            catch (Exception exception)
             {
+                Debug.WriteLine("BMP280 probe failed at 0x" + address.ToString("X2") + ": " + exception.Message);
                 return null;
+            }
+        }
+
+        private void ResetSht40(string reason)
+        {
+            DisposeDevice(_sht40, reason);
+            _sht40 = null;
+        }
+
+        private void ResetBmp280(string reason)
+        {
+            DisposeDevice(_bmp280, reason);
+            _bmp280 = null;
+            _bmp280Initialized = false;
+            _bmp280Address = 0;
+            _bmp280ChipId = 0;
+        }
+
+        private static void DisposeDevice(I2cDevice device, string reason)
+        {
+            if (device == null)
+            {
+                return;
+            }
+
+            try
+            {
+                device.Dispose();
+                Debug.WriteLine(reason + ": I2C device disposed for retry.");
+            }
+            catch (Exception exception)
+            {
+                Debug.WriteLine(reason + ": I2C dispose failed: " + exception.Message);
             }
         }
 
@@ -318,6 +348,43 @@ namespace MeteoStanice
             }
 
             Debug.WriteLine("BMP280 measurement timeout, reading last available sample.");
+        }
+
+        private void VerifyBmp280ChipId()
+        {
+            byte chipId = ReadRegister(_bmp280, Bmp280ChipIdRegister);
+            if (chipId != Bmp280ExpectedChipId)
+            {
+                throw new Exception("BMP280 chipId nesedi, read=0x" + chipId.ToString("X2") + ", expected=0x" + Bmp280ExpectedChipId.ToString("X2") + ".");
+            }
+        }
+
+        private static void ValidateBmp280Data(byte[] data)
+        {
+            if (data == null || data.Length < 6)
+            {
+                throw new Exception("BMP280 vratil nekompletni data frame.");
+            }
+
+            bool allZero = true;
+            bool allHigh = true;
+            for (int index = 0; index < data.Length; index++)
+            {
+                if (data[index] != 0x00)
+                {
+                    allZero = false;
+                }
+
+                if (data[index] != 0xFF)
+                {
+                    allHigh = false;
+                }
+            }
+
+            if (allZero || allHigh)
+            {
+                throw new Exception("BMP280 vratil prazdna data.");
+            }
         }
 
         private void ReadBmp280Calibration()

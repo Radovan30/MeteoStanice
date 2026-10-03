@@ -1,6 +1,7 @@
 using System;
 using System.Diagnostics;
-using System.Net.Http;
+using System.Net;
+using System.Net.Sockets;
 using System.Text;
 
 namespace MeteoStanice
@@ -23,7 +24,8 @@ namespace MeteoStanice
         private string _apiKey;
         // Current station identity used in upload payloads.
         private StationIdentity _identity;
-        private readonly HttpClient _httpClient;
+        private IStationConfigurationStore _configurationStore;
+        private StationConfiguration _configuration;
         private long _nextHttpAttemptTicks;
 
         // True after at least one upload attempt happened.
@@ -39,15 +41,6 @@ namespace MeteoStanice
         public NanoUploadClient()
         {
             ServerAvailable = true;
-            _httpClient = new HttpClient();
-            try
-            {
-                _httpClient.Timeout = new TimeSpan(0, 0, 4);
-            }
-            catch (System.Exception exception)
-            {
-                Debug.WriteLine("HTTP timeout nelze nastavit: " + exception.Message);
-            }
         }
 
         /// <summary>
@@ -56,6 +49,15 @@ namespace MeteoStanice
         public void ConfigureIdentity(StationIdentity identity)
         {
             _identity = identity;
+        }
+
+        /// <summary>
+        /// Stores mutable configuration so the backend-assigned station code can be persisted.
+        /// </summary>
+        public void ConfigureConfiguration(IStationConfigurationStore configurationStore, StationConfiguration configuration)
+        {
+            _configurationStore = configurationStore;
+            _configuration = configuration;
         }
 
         /// <summary>
@@ -145,25 +147,15 @@ namespace MeteoStanice
         /// </summary>
         private bool PostJson(string url, string json, string label)
         {
-            HttpResponseMessage response = null;
-            StringContent content = null;
-            HttpRequestMessage request = null;
-
             try
             {
-                content = new StringContent(json, Encoding.UTF8, "application/json");
-                request = new HttpRequestMessage(HttpMethod.Post, url);
-                request.Content = content;
-                if (_apiKey != null && _apiKey.Length > 0)
+                NanoHttpResponse response = RawHttpPost(url, json, _apiKey);
+                bool success = response.StatusCode >= 200 && response.StatusCode <= 299;
+                Debug.WriteLine("HTTP upload " + label + " status=" + response.StatusCode);
+                MarkUploadResult(success, response.StatusCode);
+                if (success)
                 {
-                    request.Headers.Add("X-Api-Key", _apiKey);
-                }
-
-                response = _httpClient.Send(request);
-                Debug.WriteLine("HTTP upload " + label + " status=" + (int)response.StatusCode);
-                MarkUploadResult(response.IsSuccessStatusCode, (int)response.StatusCode);
-                if (response.IsSuccessStatusCode)
-                {
+                    TryApplyServerStationIdentity(response.Body);
                     _nextHttpAttemptTicks = 0;
                 }
                 else
@@ -171,7 +163,7 @@ namespace MeteoStanice
                     BackoffHttpAttempts();
                 }
 
-                return response.IsSuccessStatusCode;
+                return success;
             }
             catch (System.Exception exception)
             {
@@ -180,23 +172,155 @@ namespace MeteoStanice
                 BackoffHttpAttempts();
                 return false;
             }
+        }
+
+        private static NanoHttpResponse RawHttpPost(string url, string json, string apiKey)
+        {
+            HttpEndpoint endpoint = ParseHttpEndpoint(url);
+            byte[] body = Encoding.UTF8.GetBytes(json);
+            string hostHeader = endpoint.Port == 80 ? endpoint.Host : endpoint.Host + ":" + endpoint.Port;
+            string header = "POST " + endpoint.Path + " HTTP/1.1\r\n"
+                + "Host: " + hostHeader + "\r\n"
+                + "Connection: close\r\n"
+                + "Content-Type: application/json\r\n"
+                + "Content-Length: " + body.Length + "\r\n";
+
+            if (apiKey != null && apiKey.Length > 0)
+            {
+                header += "X-Api-Key: " + apiKey + "\r\n";
+            }
+
+            header += "\r\n";
+            byte[] headerBytes = Encoding.UTF8.GetBytes(header);
+            Socket socket = null;
+
+            try
+            {
+                socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+                socket.SendTimeout = 4000;
+                socket.ReceiveTimeout = 4000;
+                socket.Connect(new IPEndPoint(ResolveHost(endpoint.Host), endpoint.Port));
+                SendAll(socket, headerBytes);
+                SendAll(socket, body);
+                return ReadHttpResponse(socket);
+            }
             finally
             {
-                if (response != null)
+                if (socket != null)
                 {
-                    response.Dispose();
-                }
-
-                if (content != null)
-                {
-                    content.Dispose();
-                }
-
-                if (request != null)
-                {
-                    request.Dispose();
+                    socket.Close();
                 }
             }
+        }
+
+        private static HttpEndpoint ParseHttpEndpoint(string url)
+        {
+            string prefix = "http://";
+            if (url == null || url.Length <= prefix.Length || url.Substring(0, prefix.Length) != prefix)
+            {
+                throw new System.Exception("Podporovana je jen HTTP URL.");
+            }
+
+            int hostStart = prefix.Length;
+            int pathStart = url.IndexOf("/", hostStart);
+            string hostPort = pathStart < 0 ? url.Substring(hostStart) : url.Substring(hostStart, pathStart - hostStart);
+            string path = pathStart < 0 ? "/" : url.Substring(pathStart);
+            int port = 80;
+            string host = hostPort;
+            int portStart = hostPort.IndexOf(":");
+            if (portStart >= 0)
+            {
+                host = hostPort.Substring(0, portStart);
+                port = ParsePositiveInt(hostPort.Substring(portStart + 1), 80);
+            }
+
+            HttpEndpoint endpoint = new HttpEndpoint();
+            endpoint.Host = host;
+            endpoint.Port = port;
+            endpoint.Path = path;
+            return endpoint;
+        }
+
+        private static IPAddress ResolveHost(string host)
+        {
+            try
+            {
+                return IPAddress.Parse(host);
+            }
+            catch
+            {
+                IPHostEntry entry = Dns.GetHostEntry(host);
+                if (entry == null || entry.AddressList == null || entry.AddressList.Length == 0)
+                {
+                    throw new System.Exception("Host nelze prelozit.");
+                }
+
+                return entry.AddressList[0];
+            }
+        }
+
+        private static NanoHttpResponse ReadHttpResponse(Socket socket)
+        {
+            const int MaxResponseChars = 4096;
+            byte[] buffer = new byte[512];
+            StringBuilder responseBuilder = new StringBuilder();
+
+            while (responseBuilder.Length < MaxResponseChars)
+            {
+                int received = 0;
+                try
+                {
+                    received = socket.Receive(buffer);
+                }
+                catch
+                {
+                    break;
+                }
+
+                if (received <= 0)
+                {
+                    break;
+                }
+
+                responseBuilder.Append(Encoding.UTF8.GetString(buffer, 0, received));
+            }
+
+            string response = responseBuilder.ToString();
+            NanoHttpResponse result = new NanoHttpResponse();
+            int firstSpace = response.IndexOf(" ");
+            if (firstSpace < 0 || firstSpace + 4 > response.Length)
+            {
+                result.StatusCode = 0;
+                result.Body = string.Empty;
+                return result;
+            }
+
+            result.StatusCode = ParsePositiveInt(response.Substring(firstSpace + 1, 3), 0);
+            int bodyStart = response.IndexOf("\r\n\r\n");
+            result.Body = bodyStart < 0 ? string.Empty : response.Substring(bodyStart + 4);
+            return result;
+        }
+
+        private static int ParsePositiveInt(string value, int defaultValue)
+        {
+            if (value == null || value.Length == 0)
+            {
+                return defaultValue;
+            }
+
+            int parsed = 0;
+            for (int index = 0; index < value.Length; index++)
+            {
+                char character = value[index];
+                if (character < '0' || character > '9')
+                {
+                    return defaultValue;
+                }
+
+                parsed = (parsed * 10) + (character - '0');
+            }
+
+            return parsed;
         }
 
         private void MarkUploadResult(bool succeeded, int httpStatusCode)
@@ -227,6 +351,153 @@ namespace MeteoStanice
             _nextHttpAttemptTicks = DateTime.UtcNow.Ticks + (FailedUploadBackoffMilliseconds * TimeSpan.TicksPerMillisecond);
         }
 
+        private void TryApplyServerStationIdentity(string responseBody)
+        {
+            if (_configurationStore == null || _configuration == null || responseBody == null || responseBody.Length == 0)
+            {
+                return;
+            }
+
+            string stationCode = ReadJsonStringProperty(responseBody, "stationCode");
+            if (stationCode == null || stationCode.Length == 0 || !ShouldAcceptServerStationCode(_configuration.StationId))
+            {
+                return;
+            }
+
+            string stationName = ReadJsonStringProperty(responseBody, "stationName");
+            _configuration.StationId = stationCode;
+            if (stationName != null && stationName.Length > 0)
+            {
+                _configuration.StationName = stationName;
+            }
+            else if (_configuration.StationName == null || _configuration.StationName.Length == 0 || ShouldAcceptServerStationCode(_configuration.StationName))
+            {
+                _configuration.StationName = stationCode;
+            }
+
+            if (_identity != null)
+            {
+                _identity.StationId = _configuration.StationId;
+                _identity.StationName = _configuration.StationName;
+            }
+
+            if (_configurationStore.Save(_configuration))
+            {
+                Debug.WriteLine("Station kod prevzat ze serveru a ulozen do flash: " + stationCode);
+            }
+        }
+
+        private static void SendAll(Socket socket, byte[] data)
+        {
+            int sentTotal = 0;
+            while (sentTotal < data.Length)
+            {
+                int sent = socket.Send(data, sentTotal, data.Length - sentTotal, SocketFlags.None);
+                if (sent <= 0)
+                {
+                    throw new System.Exception("HTTP socket send selhal.");
+                }
+
+                sentTotal += sent;
+            }
+        }
+
+        private static bool ShouldAcceptServerStationCode(string currentStationCode)
+        {
+            if (currentStationCode == null || currentStationCode.Length == 0)
+            {
+                return true;
+            }
+
+            return EqualsIgnoreCase(currentStationCode, "METEO-UNKNOWN")
+                || StartsWithIgnoreCase(currentStationCode, "METEO-TEST-")
+                || LooksLikeGuid(currentStationCode);
+        }
+
+        private static string ReadJsonStringProperty(string json, string propertyName)
+        {
+            string marker = "\"" + propertyName + "\"";
+            int nameStart = json.IndexOf(marker);
+            if (nameStart < 0)
+            {
+                return string.Empty;
+            }
+
+            int colon = json.IndexOf(":", nameStart + marker.Length);
+            if (colon < 0)
+            {
+                return string.Empty;
+            }
+
+            int valueStart = json.IndexOf("\"", colon + 1);
+            if (valueStart < 0)
+            {
+                return string.Empty;
+            }
+
+            StringBuilder value = new StringBuilder();
+            for (int index = valueStart + 1; index < json.Length; index++)
+            {
+                char character = json[index];
+                if (character == '"')
+                {
+                    return value.ToString();
+                }
+
+                if (character == '\\' && index + 1 < json.Length)
+                {
+                    char escaped = json[index + 1];
+                    if (escaped == '"' || escaped == '\\' || escaped == '/')
+                    {
+                        value.Append(escaped);
+                        index++;
+                    }
+                    else if (escaped == 'n')
+                    {
+                        value.Append('\n');
+                        index++;
+                    }
+                    else if (escaped == 'r')
+                    {
+                        value.Append('\r');
+                        index++;
+                    }
+                    else if (escaped == 't')
+                    {
+                        value.Append('\t');
+                        index++;
+                    }
+                    else
+                    {
+                        value.Append(character);
+                    }
+                }
+                else
+                {
+                    value.Append(character);
+                }
+            }
+
+            return string.Empty;
+        }
+
+        private static bool EqualsIgnoreCase(string value, string expected)
+        {
+            return value != null && expected != null && value.ToLower() == expected.ToLower();
+        }
+
+        private static bool StartsWithIgnoreCase(string value, string prefix)
+        {
+            return value != null && prefix != null && value.Length >= prefix.Length && value.Substring(0, prefix.Length).ToLower() == prefix.ToLower();
+        }
+
+        private static bool LooksLikeGuid(string value)
+        {
+            return value != null
+                && value.Length == 36
+                && value.IndexOf("-") == 8;
+        }
+
         /// <summary>
         /// Serializes one measurement record to compact JSON.
         /// </summary>
@@ -236,6 +507,8 @@ namespace MeteoStanice
                 + "\"stationGuid\":\"" + JsonEscape(GetStationGuid()) + "\","
                 + "\"stationId\":\"" + JsonEscape(record.StationId) + "\","
                 + "\"stationCode\":\"" + JsonEscape(record.StationId) + "\","
+                + "\"hardwareId\":\"" + JsonEscape(GetHardwareId()) + "\","
+                + "\"firmwareVersion\":\"" + JsonEscape(GetFirmwareVersion()) + "\","
                 + "\"sequenceNumber\":" + record.SequenceNumber + ","
                 + "\"measuredAt\":\"" + JsonEscape(record.SampledAt.ToString("o")) + "\","
                 + "\"sampledAt\":\"" + JsonEscape(record.SampledAt.ToString("o")) + "\","
@@ -293,6 +566,8 @@ namespace MeteoStanice
                 + "\"stationGuid\":\"" + JsonEscape(GetStationGuid()) + "\","
                 + "\"stationId\":\"" + JsonEscape(deviceEvent.StationId) + "\","
                 + "\"stationCode\":\"" + JsonEscape(deviceEvent.StationId) + "\","
+                + "\"hardwareId\":\"" + JsonEscape(GetHardwareId()) + "\","
+                + "\"firmwareVersion\":\"" + JsonEscape(GetFirmwareVersion()) + "\","
                 + "\"sequenceNumber\":" + deviceEvent.SequenceNumber + ","
                 + "\"occurredAt\":\"" + JsonEscape(deviceEvent.OccurredAt.ToString("o")) + "\","
                 + "\"severity\":\"" + deviceEvent.Severity.ToString() + "\","
@@ -306,6 +581,16 @@ namespace MeteoStanice
         private string GetStationGuid()
         {
             return _identity == null || _identity.StationGuid == null ? string.Empty : _identity.StationGuid;
+        }
+
+        private string GetHardwareId()
+        {
+            return _identity == null || _identity.DeviceHardwareId == null ? string.Empty : _identity.DeviceHardwareId;
+        }
+
+        private string GetFirmwareVersion()
+        {
+            return _identity == null || _identity.FirmwareVersion == null ? string.Empty : _identity.FirmwareVersion;
         }
 
         /// <summary>
@@ -347,6 +632,19 @@ namespace MeteoStanice
             return escaped.ToString();
         }
 
+    }
+
+    internal sealed class HttpEndpoint
+    {
+        public string Host { get; set; }
+        public int Port { get; set; }
+        public string Path { get; set; }
+    }
+
+    internal sealed class NanoHttpResponse
+    {
+        public int StatusCode { get; set; }
+        public string Body { get; set; }
     }
 
     /// <summary>

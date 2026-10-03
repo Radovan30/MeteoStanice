@@ -8,12 +8,22 @@ public sealed class MeasurementDto
     /// <summary>
     /// Database identifier of the measurement.
     /// </summary>
-    public long Id { get; set; }
+    public Guid Id { get; set; }
 
     /// <summary>
     /// Stable GUID of the station that produced the measurement.
     /// </summary>
     public Guid StationGuid { get; set; }
+
+    /// <summary>
+    /// Human-readable station code assigned by the backend.
+    /// </summary>
+    public string StationCode { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Display name assigned to the station.
+    /// </summary>
+    public string StationName { get; set; } = string.Empty;
 
     /// <summary>
     /// Station-local monotonically increasing measurement sequence.

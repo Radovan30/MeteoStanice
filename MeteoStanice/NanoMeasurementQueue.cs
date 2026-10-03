@@ -8,6 +8,7 @@ namespace MeteoStanice
     public sealed class NanoMeasurementQueue
     {
         private readonly Queue _items;
+        private readonly object _syncRoot = new object();
         private readonly int _capacity;
         private int _droppedCount;
 
@@ -25,7 +26,10 @@ namespace MeteoStanice
         {
             get
             {
-                return _items.Count;
+                lock (_syncRoot)
+                {
+                    return _items.Count;
+                }
             }
         }
 
@@ -51,18 +55,21 @@ namespace MeteoStanice
         /// </summary>
         public bool Enqueue(NanoMeasurementRecord record)
         {
-            if (record == null || _items.Count >= _capacity)
+            lock (_syncRoot)
             {
-                if (record != null)
+                if (record == null || _items.Count >= _capacity)
                 {
-                    _droppedCount++;
+                    if (record != null)
+                    {
+                        _droppedCount++;
+                    }
+
+                    return false;
                 }
 
-                return false;
+                _items.Enqueue(record);
+                return true;
             }
-
-            _items.Enqueue(record);
-            return true;
         }
 
         /// <summary>
@@ -70,14 +77,17 @@ namespace MeteoStanice
         /// </summary>
         public bool TryPeek(out NanoMeasurementRecord record)
         {
-            if (_items.Count == 0)
+            lock (_syncRoot)
             {
-                record = null;
-                return false;
-            }
+                if (_items.Count == 0)
+                {
+                    record = null;
+                    return false;
+                }
 
-            record = (NanoMeasurementRecord)_items.Peek();
-            return true;
+                record = (NanoMeasurementRecord)_items.Peek();
+                return true;
+            }
         }
 
         /// <summary>
@@ -85,14 +95,17 @@ namespace MeteoStanice
         /// </summary>
         public bool TryDequeue(out NanoMeasurementRecord record)
         {
-            if (_items.Count == 0)
+            lock (_syncRoot)
             {
-                record = null;
-                return false;
-            }
+                if (_items.Count == 0)
+                {
+                    record = null;
+                    return false;
+                }
 
-            record = (NanoMeasurementRecord)_items.Dequeue();
-            return true;
+                record = (NanoMeasurementRecord)_items.Dequeue();
+                return true;
+            }
         }
     }
 }

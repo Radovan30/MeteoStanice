@@ -1,5 +1,6 @@
 using MeteoStanice.Api.Hubs;
 using MeteoStanice.Api.Security;
+using MeteoStanice.Api.Services;
 using MeteoStanice.Contracts.Measurements;
 using MeteoStanice.Data;
 using MeteoStanice.Data.Entities;
@@ -30,10 +31,9 @@ public sealed class MeasurementsController(
         Station station = await GetOrCreateStation(request, ct);
 
         station.LastSeenAt = DateTimeOffset.UtcNow;
-        if (station.Id == 0)
+        if (dbContext.Entry(station).State == EntityState.Detached)
         {
-            dbContext.Stations.Add(station);
-            await dbContext.SaveChangesAsync(ct);
+            station = await SaveNewStationWithRetry(station, ct);
         }
 
         Measurement? existingMeasurement = await dbContext.Measurements
@@ -41,7 +41,7 @@ public sealed class MeasurementsController(
             .SingleOrDefaultAsync(item => item.StationId == station.Id && item.SequenceNumber == request.SequenceNumber, ct);
         if (existingMeasurement is not null)
         {
-            return Ok(MapMeasurement(existingMeasurement, station.StationGuid, existingMeasurement.QualityFlags.Count));
+            return Ok(MapMeasurement(existingMeasurement, station, existingMeasurement.QualityFlags.Count));
         }
 
         Measurement measurement = new()
@@ -105,7 +105,7 @@ public sealed class MeasurementsController(
         await StoreQualityFlags(measurement, flags, ct);
         await dbContext.SaveChangesAsync(ct);
 
-        MeasurementDto dto = MapMeasurement(measurement, station.StationGuid, flags.Count);
+        MeasurementDto dto = MapMeasurement(measurement, station, flags.Count);
         await meteoHubContext.Clients.All.SendAsync(MeteoHub.MeasurementReceivedMethod, dto, ct);
 
         return CreatedAtAction(nameof(GetRecent), new { stationGuid = station.StationGuid }, dto);
@@ -127,6 +127,8 @@ public sealed class MeasurementsController(
             {
                 Id = item.Id,
                 StationGuid = item.Station.StationGuid,
+                StationCode = item.Station.StationCode,
+                StationName = item.Station.Name,
                 SequenceNumber = item.SequenceNumber,
                 MeasuredAt = item.MeasuredAt,
                 TemperatureCelsius = item.TemperatureCelsius,
@@ -177,50 +179,159 @@ public sealed class MeasurementsController(
 
     private async Task<Station> GetOrCreateStation(MeasurementUploadRequest request, CancellationToken ct)
     {
-        string stationCode = GetStationCode(request);
+        string requestedStationCode = GetStationCode(request);
+        string hardwareId = Normalize(request.HardwareId);
+        bool generateStationCode = StationCodeAllocator.ShouldGenerate(requestedStationCode);
+        if (!string.IsNullOrWhiteSpace(hardwareId))
+        {
+            Station? stationByHardware = await dbContext.Stations.SingleOrDefaultAsync(item => item.HardwareId == hardwareId, ct);
+            if (stationByHardware is not null)
+            {
+                await UpdateStationMetadata(stationByHardware, requestedStationCode, generateStationCode, hardwareId, request.FirmwareVersion, ct);
+                return stationByHardware;
+            }
+        }
+
         if (request.StationGuid != Guid.Empty)
         {
             Station? stationByGuid = await dbContext.Stations.SingleOrDefaultAsync(item => item.StationGuid == request.StationGuid, ct);
             if (stationByGuid is not null)
             {
-                UpdateStationMetadata(stationByGuid, request, stationCode);
+                if (IsDifferentHardware(stationByGuid, hardwareId))
+                {
+                    string collisionStationCode = generateStationCode
+                        ? await StationCodeAllocator.GetNextCodeAsync(dbContext, ct)
+                        : requestedStationCode;
+
+                    return CreateStation(request, collisionStationCode, hardwareId, Guid.NewGuid());
+                }
+
+                await UpdateStationMetadata(stationByGuid, requestedStationCode, generateStationCode, hardwareId, request.FirmwareVersion, ct);
                 return stationByGuid;
             }
         }
 
-        Station? stationByCode = await dbContext.Stations.SingleOrDefaultAsync(item => item.StationCode == stationCode, ct);
-        if (stationByCode is not null)
+        if (!generateStationCode)
         {
-            UpdateStationMetadata(stationByCode, request, stationCode);
-            return stationByCode;
+            Station? stationByCode = await dbContext.Stations.SingleOrDefaultAsync(item => item.StationCode == requestedStationCode, ct);
+            if (stationByCode is not null)
+            {
+                if (IsDifferentHardware(stationByCode, hardwareId))
+                {
+                    string collisionStationCode = await StationCodeAllocator.GetNextCodeAsync(dbContext, ct);
+                    return CreateStation(request, collisionStationCode, hardwareId, Guid.NewGuid());
+                }
+
+                await UpdateStationMetadata(stationByCode, requestedStationCode, generateStationCode, hardwareId, request.FirmwareVersion, ct);
+                return stationByCode;
+            }
         }
 
-        return CreateStation(request, stationCode);
+        string stationCode = generateStationCode
+            ? await StationCodeAllocator.GetNextCodeAsync(dbContext, ct)
+            : requestedStationCode;
+
+        return CreateStation(request, stationCode, hardwareId, request.StationGuid);
     }
 
-    private static Station CreateStation(MeasurementUploadRequest request, string stationCode)
+    private async Task<Station> SaveNewStationWithRetry(Station station, CancellationToken ct)
+    {
+        for (int attempt = 1; attempt <= 5; attempt++)
+        {
+            try
+            {
+                dbContext.Stations.Add(station);
+                await dbContext.SaveChangesAsync(ct);
+                return station;
+            }
+            catch (DbUpdateException) when (attempt < 5)
+            {
+                dbContext.Entry(station).State = EntityState.Detached;
+
+                Station? existingStation = await FindExistingStationAfterInsertConflict(station, ct);
+                if (existingStation is not null)
+                {
+                    return existingStation;
+                }
+
+                station.Id = Guid.NewGuid();
+                station.StationGuid = Guid.NewGuid();
+                station.StationCode = await StationCodeAllocator.GetNextCodeAsync(dbContext, ct);
+                station.Name = StationCodeAllocator.CreateStationName(station.StationCode);
+            }
+        }
+
+        throw new InvalidOperationException("Station registration failed after repeated unique key conflicts.");
+    }
+
+    private async Task<Station?> FindExistingStationAfterInsertConflict(Station station, CancellationToken ct)
+    {
+        if (!string.IsNullOrWhiteSpace(station.HardwareId))
+        {
+            Station? stationByHardware = await dbContext.Stations.SingleOrDefaultAsync(item => item.HardwareId == station.HardwareId, ct);
+            if (stationByHardware is not null)
+            {
+                return stationByHardware;
+            }
+        }
+
+        if (station.StationGuid != Guid.Empty)
+        {
+            Station? stationByGuid = await dbContext.Stations.SingleOrDefaultAsync(item => item.StationGuid == station.StationGuid, ct);
+            if (stationByGuid is not null && !IsDifferentHardware(stationByGuid, station.HardwareId))
+            {
+                return stationByGuid;
+            }
+        }
+
+        return null;
+    }
+
+    private static Station CreateStation(MeasurementUploadRequest request, string stationCode, string hardwareId, Guid stationGuid)
         => new()
         {
-            StationGuid = request.StationGuid == Guid.Empty ? Guid.NewGuid() : request.StationGuid,
+            StationGuid = stationGuid == Guid.Empty ? Guid.NewGuid() : stationGuid,
             StationCode = stationCode,
             Name = stationCode,
+            HardwareId = hardwareId,
+            FirmwareVersion = Normalize(request.FirmwareVersion),
             CreatedAt = DateTimeOffset.UtcNow,
             LastSeenAt = DateTimeOffset.UtcNow,
             IsActive = true
         };
 
-    private static void UpdateStationMetadata(Station station, MeasurementUploadRequest request, string stationCode)
+    private async Task UpdateStationMetadata(Station station, string requestedStationCode, bool generateStationCode, string hardwareId, string firmwareVersion, CancellationToken ct)
     {
-        if (string.IsNullOrWhiteSpace(station.StationCode))
+        if (string.IsNullOrWhiteSpace(station.StationCode) || StationCodeAllocator.ShouldGenerate(station.StationCode))
         {
-            station.StationCode = stationCode;
+            station.StationCode = generateStationCode
+                ? await StationCodeAllocator.GetNextCodeAsync(dbContext, ct)
+                : requestedStationCode;
         }
 
-        if (string.IsNullOrWhiteSpace(station.Name))
+        if (StationCodeAllocator.HasGeneratedOrPlaceholderName(station))
         {
-            station.Name = stationCode;
+            station.Name = StationCodeAllocator.CreateStationName(station.StationCode);
+        }
+
+        if (!string.IsNullOrWhiteSpace(hardwareId) && string.IsNullOrWhiteSpace(station.HardwareId))
+        {
+            station.HardwareId = hardwareId;
+        }
+
+        if (!string.IsNullOrWhiteSpace(firmwareVersion))
+        {
+            station.FirmwareVersion = Normalize(firmwareVersion);
         }
     }
+
+    private static bool IsDifferentHardware(Station station, string hardwareId)
+        => !string.IsNullOrWhiteSpace(hardwareId)
+            && !string.IsNullOrWhiteSpace(station.HardwareId)
+            && !string.Equals(station.HardwareId, hardwareId, StringComparison.OrdinalIgnoreCase);
+
+    private static string Normalize(string? value)
+        => string.IsNullOrWhiteSpace(value) ? string.Empty : value.Trim();
 
     private static string GetStationCode(MeasurementUploadRequest request)
     {
@@ -297,11 +408,13 @@ public sealed class MeasurementsController(
         return check;
     }
 
-    private static MeasurementDto MapMeasurement(Measurement measurement, Guid stationGuid, int qualityFlagCount)
+    private static MeasurementDto MapMeasurement(Measurement measurement, Station station, int qualityFlagCount)
         => new()
         {
             Id = measurement.Id,
-            StationGuid = stationGuid,
+            StationGuid = station.StationGuid,
+            StationCode = station.StationCode,
+            StationName = station.Name,
             SequenceNumber = measurement.SequenceNumber,
             MeasuredAt = measurement.MeasuredAt,
             TemperatureCelsius = measurement.TemperatureCelsius,

@@ -9,7 +9,9 @@ string connectionString = builder.Configuration.GetConnectionString("MeteoDataba
     ?? throw new InvalidOperationException("Connection string 'MeteoDatabase' is not configured.");
 
 builder.Services.AddDbContext<MeteoDbContext>(options =>
-    options.UseNpgsql(connectionString));
+    options.UseNpgsql(
+        connectionString,
+        npgsqlOptions => npgsqlOptions.MigrationsAssembly(typeof(MeteoDbContext).Assembly.FullName)));
 builder.Services.AddScoped<MeasurementQualityService>();
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
@@ -31,8 +33,20 @@ var app = builder.Build();
 
 using (IServiceScope scope = app.Services.CreateScope())
 {
+    ILogger<Program> logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
     MeteoDbContext dbContext = scope.ServiceProvider.GetRequiredService<MeteoDbContext>();
+    string[] pendingMigrations = dbContext.Database.GetPendingMigrations().ToArray();
+    string[] appliedMigrations = dbContext.Database.GetAppliedMigrations().ToArray();
+    logger.LogInformation(
+        "Database migrations before startup migrate: applied={AppliedCount}, pending={PendingCount}, pendingList={PendingMigrations}",
+        appliedMigrations.Length,
+        pendingMigrations.Length,
+        string.Join(", ", pendingMigrations));
+
     dbContext.Database.Migrate();
+
+    appliedMigrations = dbContext.Database.GetAppliedMigrations().ToArray();
+    logger.LogInformation("Database migrations after startup migrate: applied={AppliedCount}", appliedMigrations.Length);
 }
 
 app.UseSwagger();

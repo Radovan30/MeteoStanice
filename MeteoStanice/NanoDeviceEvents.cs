@@ -33,6 +33,7 @@ namespace MeteoStanice
     public sealed class NanoDeviceEventQueue
     {
         private readonly Queue _items;
+        private readonly object _syncRoot = new object();
         private readonly int _capacity;
 
         /// <summary>
@@ -49,7 +50,10 @@ namespace MeteoStanice
         {
             get
             {
-                return _items.Count;
+                lock (_syncRoot)
+                {
+                    return _items.Count;
+                }
             }
         }
 
@@ -67,13 +71,16 @@ namespace MeteoStanice
         /// </summary>
         public bool Enqueue(NanoDeviceEvent deviceEvent)
         {
-            if (deviceEvent == null || _items.Count >= _capacity)
+            lock (_syncRoot)
             {
-                return false;
-            }
+                if (deviceEvent == null || _items.Count >= _capacity)
+                {
+                    return false;
+                }
 
-            _items.Enqueue(deviceEvent);
-            return true;
+                _items.Enqueue(deviceEvent);
+                return true;
+            }
         }
 
         /// <summary>
@@ -81,14 +88,17 @@ namespace MeteoStanice
         /// </summary>
         public bool TryPeek(out NanoDeviceEvent deviceEvent)
         {
-            if (_items.Count == 0)
+            lock (_syncRoot)
             {
-                deviceEvent = null;
-                return false;
-            }
+                if (_items.Count == 0)
+                {
+                    deviceEvent = null;
+                    return false;
+                }
 
-            deviceEvent = (NanoDeviceEvent)_items.Peek();
-            return true;
+                deviceEvent = (NanoDeviceEvent)_items.Peek();
+                return true;
+            }
         }
 
         /// <summary>
@@ -96,14 +106,17 @@ namespace MeteoStanice
         /// </summary>
         public bool TryDequeue(out NanoDeviceEvent deviceEvent)
         {
-            if (_items.Count == 0)
+            lock (_syncRoot)
             {
-                deviceEvent = null;
-                return false;
-            }
+                if (_items.Count == 0)
+                {
+                    deviceEvent = null;
+                    return false;
+                }
 
-            deviceEvent = (NanoDeviceEvent)_items.Dequeue();
-            return true;
+                deviceEvent = (NanoDeviceEvent)_items.Dequeue();
+                return true;
+            }
         }
     }
 
@@ -142,7 +155,7 @@ namespace MeteoStanice
             NanoDeviceEvent deviceEvent = new NanoDeviceEvent();
             deviceEvent.StationId = stationId;
             deviceEvent.SequenceNumber = _sequenceNumber;
-            deviceEvent.OccurredAt = new DateTime(2026, 1, 1, 10, 0, 0).AddSeconds(_sequenceNumber);
+            deviceEvent.OccurredAt = DateTime.UtcNow;
             deviceEvent.Severity = severity;
             deviceEvent.Category = category;
             deviceEvent.Code = code;

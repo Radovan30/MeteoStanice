@@ -8,12 +8,22 @@ public sealed class DeviceEventDto
     /// <summary>
     /// Database identifier.
     /// </summary>
-    public long Id { get; set; }
+    public Guid Id { get; set; }
 
     /// <summary>
     /// Stable station GUID.
     /// </summary>
     public Guid StationGuid { get; set; }
+
+    /// <summary>
+    /// Human-readable station code assigned by the backend.
+    /// </summary>
+    public string StationCode { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Display name assigned to the station.
+    /// </summary>
+    public string StationName { get; set; } = string.Empty;
 
     /// <summary>
     /// Station-local event sequence.

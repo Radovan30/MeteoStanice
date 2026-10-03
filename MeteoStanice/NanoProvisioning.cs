@@ -20,8 +20,6 @@ namespace MeteoStanice
         public StationConfiguration Configuration { get; set; }
         // Short diagnostic message.
         public string Message { get; set; }
-        // True when SoftAP configuration was saved and another reboot is required.
-        public bool RebootRequired { get; set; }
     }
 
     /// <summary>
@@ -203,7 +201,6 @@ namespace MeteoStanice
                 {
                     Debug.WriteLine("Provisioning portal nelze spustit, stanice pokracuje v meteo rezimu.");
                     result.TimedOut = true;
-                    result.RebootRequired = true;
                     result.Message = "Setup portal did not start.";
                     return result;
                 }
@@ -248,7 +245,6 @@ namespace MeteoStanice
                 {
                     Debug.WriteLine("Provisioning portal nelze spustit v rucnim setup rezimu.");
                     result.TimedOut = false;
-                    result.RebootRequired = true;
                     result.Message = "Setup portal did not start.";
                     return result;
                 }

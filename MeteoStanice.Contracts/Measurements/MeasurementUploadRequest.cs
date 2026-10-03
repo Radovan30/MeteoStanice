@@ -21,6 +21,16 @@ public sealed class MeasurementUploadRequest
     public string StationCode { get; set; } = string.Empty;
 
     /// <summary>
+    /// Physical board identity reported by firmware.
+    /// </summary>
+    public string HardwareId { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Firmware version reported by the station.
+    /// </summary>
+    public string FirmwareVersion { get; set; } = string.Empty;
+
+    /// <summary>
     /// Station-local monotonically increasing measurement sequence.
     /// </summary>
     public int SequenceNumber { get; set; }

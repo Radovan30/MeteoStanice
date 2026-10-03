@@ -8,12 +8,12 @@ public sealed class Measurement
     /// <summary>
     /// Database identifier.
     /// </summary>
-    public long Id { get; set; }
+    public Guid Id { get; set; } = Guid.NewGuid();
 
     /// <summary>
     /// Parent station identifier.
     /// </summary>
-    public long StationId { get; set; }
+    public Guid StationId { get; set; }
 
     /// <summary>
     /// Parent station.
