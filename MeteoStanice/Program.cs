@@ -27,6 +27,7 @@ namespace MeteoStanice
             StationIdentity identity = identityService.CreateIdentity(configuration);
             NanoTtgoDisplay display = new NanoTtgoDisplay();
             display.Initialize();
+            display.SetStationIdentity(identity.StationId, identity.StationName);
             display.ShowLoading("CONFIG");
             NanoTtgoButtons buttons = new NanoTtgoButtons();
             buttons.Initialize();
@@ -95,6 +96,7 @@ namespace MeteoStanice
             // Keep the app alive and run one configured meteo sample step per loop.
             while (true)
             {
+                display.SetStationIdentity(identity.StationId, identity.StationName);
                 if (HandleSetupRequest(buttons, display, wifiHardwareDiagnostics, provisioningService, configurationStore, configurationService, identityService, sensorReader, measurementQueue, eventQueue, clockService, serverStatusService, uploadClient, uploadWorker, ref configuration, ref identity, ref measurementCycle, ref realWifiConnected, counter))
                 {
                     counter++;

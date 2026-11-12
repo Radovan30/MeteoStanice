@@ -177,8 +177,8 @@ namespace MeteoStanice.Data.Migrations
                     b.Property<int>("ReceivedSampleCount")
                         .HasColumnType("integer");
 
-                    b.Property<int>("SequenceNumber")
-                        .HasColumnType("integer");
+                    b.Property<long>("SequenceNumber")
+                        .HasColumnType("bigint");
 
                     b.Property<int>("Sht40ErrorCount")
                         .HasColumnType("integer");

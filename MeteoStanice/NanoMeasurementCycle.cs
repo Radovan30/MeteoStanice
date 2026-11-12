@@ -87,7 +87,6 @@ namespace MeteoStanice
     public sealed class NanoMeasurementCycle
     {
         private readonly NanoSensorReader _sensorReader;
-        private int _sequenceNumber;
         private int _sampleCount;
         private int _validValueCount;
         private int _failedReadCount;
@@ -345,11 +344,9 @@ namespace MeteoStanice
 
         private NanoMeasurementRecord CloseInterval(string stationId, DateTime endedAt, int expectedSamples)
         {
-            _sequenceNumber++;
-
             NanoMeasurementRecord record = new NanoMeasurementRecord();
             record.StationId = stationId;
-            record.SequenceNumber = _sequenceNumber;
+            record.SequenceNumber = NanoMeasurementSequence.FromUtc(endedAt);
             record.SampledAt = endedAt;
             record.TemperatureCelsius = Average(_temperatureSum, _temperatureCount);
             record.RelativeHumidityPercent = Average(_humiditySum, _humidityCount);

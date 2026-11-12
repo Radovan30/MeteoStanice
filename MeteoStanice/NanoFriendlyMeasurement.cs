@@ -9,8 +9,8 @@ namespace MeteoStanice
     {
         // Station that produced the record.
         public string StationId { get; set; }
-        // Monotonic station-local sequence number.
-        public int SequenceNumber { get; set; }
+        // UTC interval timestamp encoded as yyyyMMddHHmmss for de-duplication.
+        public long SequenceNumber { get; set; }
         // Record timestamp.
         public DateTime SampledAt { get; set; }
         // Last valid temperature.
@@ -98,23 +98,39 @@ namespace MeteoStanice
     }
 
     /// <summary>
+    /// Creates a stable numeric identity from the UTC end of a measurement interval.
+    /// </summary>
+    internal static class NanoMeasurementSequence
+    {
+        public static long FromUtc(DateTime utcTimestamp)
+        {
+            return ((long)utcTimestamp.Year * 10000000000L)
+                + ((long)utcTimestamp.Month * 100000000L)
+                + ((long)utcTimestamp.Day * 1000000L)
+                + ((long)utcTimestamp.Hour * 10000L)
+                + ((long)utcTimestamp.Minute * 100L)
+                + utcTimestamp.Second;
+        }
+    }
+
+    /// <summary>
     /// Builds compact measurement records from concrete sensor read results.
     /// </summary>
     public sealed class NanoMeasurementBuilder
     {
-        private int _sequenceNumber;
+        private int _sampleOffsetSeconds;
 
         /// <summary>
         /// Creates one compact measurement record from latest sensor reads.
         /// </summary>
         public NanoMeasurementRecord Build(string stationId, Sht40ReadResult sht40, Bmp280ReadResult bmp280, Sps30ReadResult sps30)
         {
-            _sequenceNumber++;
+            _sampleOffsetSeconds++;
 
             NanoMeasurementRecord record = new NanoMeasurementRecord();
             record.StationId = stationId;
-            record.SequenceNumber = _sequenceNumber;
-            record.SampledAt = new DateTime(2026, 1, 1, 10, 0, 0).AddSeconds(_sequenceNumber);
+            record.SampledAt = new DateTime(2026, 1, 1, 10, 0, 0).AddSeconds(_sampleOffsetSeconds);
+            record.SequenceNumber = NanoMeasurementSequence.FromUtc(record.SampledAt);
             record.Status = MeasurementStatus.Ok;
 
             ApplySht40(record, sht40);

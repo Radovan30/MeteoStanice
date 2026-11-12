@@ -35,7 +35,7 @@ namespace MeteoStanice
         private const double BatteryCalibrationMultiplier = 1.0;
         private const double BatteryPresentVoltage = 3.0;
         private const double BatteryLowVoltage = 3.5;
-        private const double SourceVoltageThreshold = 3.9;
+        private const double SourceVoltageThreshold = 3.7;
         private const int AdcWarmupMilliseconds = 10;
         private GpioController _gpioController;
         private AdcController _adcController;

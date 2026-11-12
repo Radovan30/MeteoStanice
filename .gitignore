@@ -361,3 +361,6 @@ MigrationBackup/
 
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
+# Docasne obrazky stranek z PDF (jen lokalne, neverzovat)
+tmp_pdf_pages/
+tmp_pdf_pages_contact/

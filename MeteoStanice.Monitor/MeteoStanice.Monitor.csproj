@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <RootNamespace>MeteoStanice.Monitor</RootNamespace>
+    <AssemblyTitle>MeteoStanice Monitor</AssemblyTitle>
+    <!-- Ikona .exe (Pruzkumnik, zastupce, hlavni panel). -->
+    <ApplicationIcon>Assets\app.ico</ApplicationIcon>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="10.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.EnvironmentVariables" Version="10.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="10.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Pouze cteni: pouziva se entitovy model a DbContext, migrace se z teto aplikace nikdy nespousti. -->
+    <ProjectReference Include="..\MeteoStanice.Data\MeteoStanice.Data.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Ikona okna a logo v liste (vlozeno do .exe jako WPF Resource). -->
+    <Resource Include="Assets\app.ico" />
+    <Resource Include="Assets\app-64.png" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="appsettings.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="appsettings.Local.json" CopyToOutputDirectory="PreserveNewest" Condition="Exists('appsettings.Local.json')" />
+    <None Update="Sounds\alarm.wav" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

@@ -31,9 +31,9 @@ public sealed class MeasurementUploadRequest
     public string FirmwareVersion { get; set; } = string.Empty;
 
     /// <summary>
-    /// Station-local monotonically increasing measurement sequence.
+    /// UTC interval timestamp encoded as yyyyMMddHHmmss.
     /// </summary>
-    public int SequenceNumber { get; set; }
+    public long SequenceNumber { get; set; }
 
     /// <summary>
     /// UTC timestamp when the measurement interval was closed.

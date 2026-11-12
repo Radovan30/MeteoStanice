@@ -35,6 +35,21 @@ namespace MeteoStanice
         private bool _lastWifiConnected;
         private bool _modeIndicatorDrawn;
         private bool _wifiIndicatorDrawn;
+        private string _stationTitle = "METEO";
+
+        /// <summary>
+        /// Updates the short station title shown in normal meteo mode.
+        /// </summary>
+        public void SetStationIdentity(string stationCode, string stationName)
+        {
+            string stationNumber = TrailingNumber(stationCode);
+            if (stationNumber.Length == 0)
+            {
+                stationNumber = TrailingNumber(stationName);
+            }
+
+            _stationTitle = stationNumber.Length == 0 ? "METEO" : "METEO" + stationNumber;
+        }
 
         /// <summary>
         /// Initializes SPI routing and the ST7789 display driver.
@@ -132,7 +147,7 @@ namespace MeteoStanice
         /// </summary>
         public void ShowWifiConnecting(string wifiSsid)
         {
-            DrawStatus(false, false, "METEO", WifiSsidLine(wifiSsid, false, string.Empty), "IP 0.0.0.0", "WIFI START");
+            DrawStatus(false, false, _stationTitle, WifiSsidLine(wifiSsid, false, string.Empty), "IP 0.0.0.0", "WIFI START");
         }
 
         /// <summary>
@@ -326,7 +341,7 @@ namespace MeteoStanice
 
             try
             {
-                string modeText = provisioningActive ? "SETUP" : "METEO";
+                string modeText = provisioningActive ? "SETUP" : _stationTitle;
                 string ssidText = WifiSsidLine(wifiSsid, wifiConnected, wifiMessage);
                 string ipText = "IP " + NormalizeDisplayText(ipAddress, 18);
                 DrawStatus(provisioningActive, wifiConnected, modeText, ssidText, ipText, NormalizeDisplayText(wifiMessage, 18), dateText, timeText, locationText, batteryActive, batteryVoltage, hasBatteryVoltage, uploadTimeText, uploadStatusText, queueStatusText);
@@ -755,6 +770,33 @@ namespace MeteoStanice
             }
 
             return "ERR";
+        }
+
+        private static string TrailingNumber(string value)
+        {
+            if (value == null || value.Length == 0)
+            {
+                return string.Empty;
+            }
+
+            int end = value.Length - 1;
+            if (value[end] < '0' || value[end] > '9')
+            {
+                return string.Empty;
+            }
+
+            int start = end;
+            while (start > 0 && value[start - 1] >= '0' && value[start - 1] <= '9')
+            {
+                start--;
+            }
+
+            while (start < end && value[start] == '0')
+            {
+                start++;
+            }
+
+            return value.Substring(start, end - start + 1);
         }
 
         private static char NormalizeDisplayCharacter(char character)

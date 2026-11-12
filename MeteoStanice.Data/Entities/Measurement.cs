@@ -21,9 +21,9 @@ public sealed class Measurement
     public Station Station { get; set; } = null!;
 
     /// <summary>
-    /// Station-local monotonically increasing sequence number.
+    /// UTC interval timestamp encoded as yyyyMMddHHmmss.
     /// </summary>
-    public int SequenceNumber { get; set; }
+    public long SequenceNumber { get; set; }
 
     /// <summary>
     /// UTC timestamp when the interval was closed.

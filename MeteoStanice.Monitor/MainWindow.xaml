@@ -1,0 +1,494 @@
+<Window x:Class="MeteoStanice.Monitor.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:vm="clr-namespace:MeteoStanice.Monitor.ViewModels"
+        xmlns:controls="clr-namespace:MeteoStanice.Monitor.Controls"
+        xmlns:sys="clr-namespace:System;assembly=System.Runtime"
+        mc:Ignorable="d"
+        d:DataContext="{d:DesignInstance Type=vm:MainViewModel}"
+        Title="{Binding AppTitle}"
+        Width="1150" MinWidth="400" MinHeight="300"
+        SizeToContent="Height"
+        MaxHeight="{x:Static SystemParameters.MaximizedPrimaryScreenHeight}"
+        WindowStartupLocation="CenterScreen"
+        WindowStyle="None" AllowsTransparency="True" Background="Transparent" ResizeMode="NoResize"
+        Icon="pack://application:,,,/Assets/app.ico"
+        FontFamily="Segoe UI" FontSize="13">
+
+    <Window.Resources>
+        <sys:Double x:Key="CardWidth">360</sys:Double>
+
+        <!-- ===== Svetla horni lista ===== -->
+
+        <!-- Prepinac stanice v segmentove skupine: vyplneny barvou stanice = zobrazena, barevny text = skryta.
+             Tecka = stav stanice (viditelny i u skryte stanice). -->
+        <DataTemplate x:Key="StationToggleTemplate" DataType="{x:Type vm:StationViewModel}">
+            <ToggleButton IsChecked="{Binding IsVisible, Mode=TwoWay}" Margin="2,0" Cursor="Hand"
+                          MouseDoubleClick="StationToggle_DoubleClick">
+                <ToggleButton.ToolTip>
+                    <TextBlock>
+                        <Run Text="{Binding Title, Mode=OneWay}" FontWeight="SemiBold" />
+                        <Run Text=" – klik: zobrazit/skrýt, dvojklik: jen tato stanice" />
+                    </TextBlock>
+                </ToggleButton.ToolTip>
+                <ToggleButton.Template>
+                    <ControlTemplate TargetType="ToggleButton">
+                        <!-- Zapnuto: svetly podklad v barve stanice + barevny obrys, cerny text. Vypnuto: jen sedy text. -->
+                        <Border x:Name="Bd" CornerRadius="13" Padding="10,3" BorderThickness="1.5"
+                                Background="{Binding AccentChip}" BorderBrush="{Binding AccentBrush}">
+                            <StackPanel Orientation="Horizontal">
+                                <Ellipse Width="8" Height="8" Margin="0,0,6,0" Fill="{Binding HealthBrush}"
+                                         VerticalAlignment="Center" />
+                                <TextBlock x:Name="Txt" Text="{Binding ShortTitle}" Foreground="#1F2933" FontWeight="SemiBold" />
+                            </StackPanel>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="False">
+                                <Setter TargetName="Bd" Property="Background" Value="Transparent" />
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="Transparent" />
+                                <Setter TargetName="Txt" Property="Foreground" Value="#8A96A3" />
+                            </Trigger>
+                            <MultiTrigger>
+                                <MultiTrigger.Conditions>
+                                    <Condition Property="IsChecked" Value="False" />
+                                    <Condition Property="IsMouseOver" Value="True" />
+                                </MultiTrigger.Conditions>
+                                <Setter TargetName="Bd" Property="Background" Value="{Binding AccentTint}" />
+                            </MultiTrigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </ToggleButton.Template>
+            </ToggleButton>
+        </DataTemplate>
+
+        <!-- Tlacitko "Vse" uvnitr segmentove skupiny. -->
+        <Style x:Key="SegmentButton" TargetType="Button">
+            <Setter Property="Foreground" Value="#37474F" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Margin" Value="2,0" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd" CornerRadius="13" Padding="10,3" BorderThickness="1.5" BorderBrush="Transparent" Background="White">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#DDE3EA" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Kulate ikonove tlacitko (zvonek, test zvuku). Segoe UI Symbol = jednobarevne ikony, ktere jde obarvit. -->
+        <Style x:Key="IconButtonBase" TargetType="ButtonBase">
+            <Setter Property="Width" Value="34" />
+            <Setter Property="Height" Value="34" />
+            <Setter Property="Margin" Value="6,0,0,0" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="FontFamily" Value="Segoe UI Symbol" />
+            <Setter Property="FontSize" Value="15" />
+            <Setter Property="Foreground" Value="#455A64" />
+            <Setter Property="Background" Value="White" />
+            <Setter Property="BorderBrush" Value="#CFD6DE" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+        </Style>
+
+        <Style x:Key="IconButton" TargetType="Button" BasedOn="{StaticResource IconButtonBase}">
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd" CornerRadius="17" BorderThickness="1.5"
+                                Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#F1F4F8" />
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="#9AA7B5" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Pripnuti na plochu: modre, kdyz je okno pripnute jako widget. -->
+        <Style x:Key="PinButton" TargetType="Button" BasedOn="{StaticResource IconButton}">
+            <Setter Property="ToolTip" Value="Připnout na plochu jako widget (za ostatní okna, bez hlavního panelu, přetažení za lištu)" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding IsWidgetMode}" Value="True">
+                    <Setter Property="Background" Value="#E3F2FD" />
+                    <Setter Property="BorderBrush" Value="#1565C0" />
+                    <Setter Property="Foreground" Value="#1565C0" />
+                    <Setter Property="ToolTip" Value="Odepnout z plochy (normální okno)" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+
+        <!-- Zvonek: zapnuto = zeleny, vypnuto = preskrtnuty sedy. -->
+        <Style x:Key="SoundToggle" TargetType="ToggleButton" BasedOn="{StaticResource IconButtonBase}">
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToggleButton">
+                        <Border x:Name="Bd" CornerRadius="17" BorderThickness="1.5" Background="#E8F5E9" BorderBrush="#2E7D32">
+                            <TextBlock x:Name="Icon" Text="&#x1F514;" Foreground="#2E7D32"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="False">
+                                <Setter TargetName="Icon" Property="Text" Value="&#x1F515;" />
+                                <Setter TargetName="Icon" Property="Foreground" Value="#9AA5B1" />
+                                <Setter TargetName="Bd" Property="Background" Value="White" />
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="#CFD6DE" />
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="#9AA7B5" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Potvrdit alarm: svetle tlacitko; pri aktivnim alarmu cervene. -->
+        <Style x:Key="AlarmButton" TargetType="Button">
+            <Setter Property="Foreground" Value="#37474F" />
+            <Setter Property="Background" Value="White" />
+            <Setter Property="BorderBrush" Value="#CFD6DE" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Margin" Value="6,0,0,0" />
+            <Setter Property="Height" Value="34" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd" CornerRadius="17" BorderThickness="1.5" Padding="14,0"
+                                Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="#9AA7B5" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding IsAlarmActive}" Value="True">
+                    <Setter Property="Background" Value="#C62828" />
+                    <Setter Property="BorderBrush" Value="#C62828" />
+                    <Setter Property="Foreground" Value="White" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+
+        <!-- TextBlock skryty, pokud je prazdny. -->
+        <Style x:Key="HideWhenEmpty" TargetType="TextBlock">
+            <Style.Triggers>
+                <Trigger Property="Text" Value="">
+                    <Setter Property="Visibility" Value="Collapsed" />
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <!-- Spolecna sablona kulateho ukazatele pro PM (PollutantGaugeViewModel) i prostredi (EnvironmentGaugeViewModel). -->
+        <DataTemplate x:Key="RingTemplate">
+            <StackPanel Margin="2,2" ToolTip="{Binding ToolTipText}">
+                <Grid Width="70" Height="70" HorizontalAlignment="Center">
+                    <controls:RingGauge Minimum="{Binding Minimum, Mode=OneWay}"
+                                        Maximum="{Binding Maximum, Mode=OneWay}"
+                                        Value="{Binding Value, Mode=OneWay}"
+                                        HasValue="{Binding HasValue, Mode=OneWay}"
+                                        Segments="{Binding Segments, Mode=OneWay}"
+                                        RingBrush="{Binding Brush}"
+                                        TrackBrush="{Binding TrackBrush}"
+                                        Thickness="7" />
+                    <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                        <TextBlock Text="{Binding ValueText}" FontSize="14" FontWeight="SemiBold" HorizontalAlignment="Center" />
+                        <TextBlock Text="{Binding Unit}" FontSize="10" Foreground="#5F6B7A" HorizontalAlignment="Center" />
+                    </StackPanel>
+                </Grid>
+                <TextBlock Text="{Binding Label}" FontSize="12" FontWeight="Bold" Foreground="{Binding LabelBrush}"
+                           HorizontalAlignment="Center" Margin="0,-6,0,0" />
+                <TextBlock Text="{Binding DetailText}" FontSize="10" Foreground="#5F6B7A" HorizontalAlignment="Center" />
+                <Border Background="{Binding StatusBackground}" CornerRadius="8" Padding="7,0,7,1" Margin="0,2,0,0"
+                        HorizontalAlignment="Center">
+                    <TextBlock Text="{Binding StatusText}" FontSize="10" FontWeight="SemiBold" Foreground="{Binding StatusBrush}"
+                               TextAlignment="Center" TextWrapping="Wrap" />
+                </Border>
+            </StackPanel>
+        </DataTemplate>
+
+        <Style x:Key="SectionHeader" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="10" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Foreground" Value="#8A96A3" />
+            <Setter Property="Margin" Value="0,10,0,2" />
+        </Style>
+
+        <DataTemplate x:Key="IssueTemplate" DataType="{x:Type vm:IssueViewModel}">
+            <DockPanel Margin="0,2">
+                <TextBlock DockPanel.Dock="Left" Text="{Binding Icon}" Foreground="{Binding Brush}" Width="20" FontWeight="Bold" />
+                <TextBlock Text="{Binding Message}" Foreground="{Binding Brush}" TextWrapping="Wrap" />
+            </DockPanel>
+        </DataTemplate>
+
+        <DataTemplate x:Key="StationTemplate" DataType="{x:Type vm:StationViewModel}">
+            <Border Width="{StaticResource CardWidth}" Margin="6" CornerRadius="8"
+                    BorderBrush="{Binding AccentBrush}" BorderThickness="1,5,1,1">
+                <Border.Style>
+                    <Style TargetType="Border">
+                        <Setter Property="Background" Value="White" />
+                        <Style.Triggers>
+                            <!-- Widget: karty mirne pruhledne, aby splynuly s plochou. -->
+                            <DataTrigger Binding="{Binding DataContext.IsWidgetMode, RelativeSource={RelativeSource AncestorType=Window}}" Value="True">
+                                <Setter Property="Background" Value="#F0FFFFFF" />
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Border.Style>
+                <Border.Effect>
+                    <DropShadowEffect BlurRadius="8" ShadowDepth="1" Opacity="0.15" />
+                </Border.Effect>
+                <StackPanel>
+                    <!-- Zahlavi v barve stanice -->
+                    <DockPanel Background="{Binding AccentTint}" Margin="0,0,0,0">
+                        <DockPanel Margin="14,8,14,8">
+                        <Border DockPanel.Dock="Right" Background="{Binding HealthBrush}" CornerRadius="4"
+                                Padding="9,3" VerticalAlignment="Top">
+                            <TextBlock Text="{Binding HealthText}" Foreground="White" FontWeight="Bold" FontSize="11" />
+                        </Border>
+                        <StackPanel Margin="0,0,8,0">
+                            <TextBlock Text="{Binding Title}" FontSize="15" FontWeight="Bold" Foreground="{Binding AccentText}" TextTrimming="CharacterEllipsis" />
+                            <TextBlock Text="{Binding Subtitle}" FontSize="11" Foreground="#5F6B7A" TextTrimming="CharacterEllipsis" />
+                        </StackPanel>
+                        </DockPanel>
+                    </DockPanel>
+
+                    <StackPanel Margin="14,0,14,12">
+
+                    <TextBlock Text="{Binding StaleText}" Margin="0,8,0,0" FontStyle="Italic" Foreground="#5F6B7A">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Style.Triggers>
+                                    <Trigger Property="Text" Value="">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                    </Trigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+
+                    <TextBlock Text="PRACHOVÉ ČÁSTICE · SPS30 · µg/m³" Style="{StaticResource SectionHeader}" />
+                    <ItemsControl ItemsSource="{Binding Gauges}"
+                                  ItemTemplate="{StaticResource RingTemplate}"
+                                  Opacity="{Binding GaugeOpacity}">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <UniformGrid Rows="1" />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                    </ItemsControl>
+
+                    <TextBlock Text="PROSTŘEDÍ · SHT40 / BMP280" Style="{StaticResource SectionHeader}" />
+                    <ItemsControl ItemsSource="{Binding EnvironmentGauges}"
+                                  ItemTemplate="{StaticResource RingTemplate}"
+                                  Opacity="{Binding GaugeOpacity}">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <UniformGrid Rows="1" />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                    </ItemsControl>
+
+                    <TextBlock Margin="0,6,0,0" Text="{Binding FooterText}" FontSize="11"
+                               Foreground="#5F6B7A" TextWrapping="Wrap" />
+
+                    <ItemsControl Margin="0,4,0,0" ItemsSource="{Binding Issues}"
+                                  ItemTemplate="{StaticResource IssueTemplate}" />
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+        </DataTemplate>
+    </Window.Resources>
+
+
+    <!-- Okno je trvale pruhledne (AllowsTransparency lze nastavit jen pred zobrazenim okna).
+         Normalni rezim: svetly podklad se stinem. Rezim widgetu: podklad uplne pruhledny, zustava lista a karty;
+         pres pruhledna mista lze klikat na plochu. -->
+    <Border x:Name="RootBorder" Margin="10" CornerRadius="10">
+        <Border.Style>
+            <Style TargetType="Border">
+                <Setter Property="Background">
+                    <Setter.Value>
+                        <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                            <GradientStop Color="#F6F8FB" Offset="0" />
+                            <GradientStop Color="#EBEFF4" Offset="1" />
+                        </LinearGradientBrush>
+                    </Setter.Value>
+                </Setter>
+                <Setter Property="BorderBrush" Value="#C9D2DC" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="Effect">
+                    <Setter.Value>
+                        <DropShadowEffect BlurRadius="12" ShadowDepth="2" Direction="270" Opacity="0.25" />
+                    </Setter.Value>
+                </Setter>
+                <Style.Triggers>
+                    <DataTrigger Binding="{Binding IsWidgetMode}" Value="True">
+                        <Setter Property="Background" Value="Transparent" />
+                        <Setter Property="BorderThickness" Value="0" />
+                        <Setter Property="Effect" Value="{x:Null}" />
+                    </DataTrigger>
+                </Style.Triggers>
+            </Style>
+        </Border.Style>
+    <DockPanel>
+        <!-- Svetla horni lista: nazev a stav pripojeni, pod tim vyber stanic a ovladani zvuku/alarmu -->
+        <Border DockPanel.Dock="Top" Padding="16,10,16,10" MouseLeftButtonDown="Header_MouseLeftButtonDown">
+            <Border.Style>
+                <Style TargetType="Border">
+                    <Setter Property="Background" Value="White" />
+                    <Setter Property="BorderBrush" Value="#D5DCE4" />
+                    <Setter Property="BorderThickness" Value="0,0,0,1" />
+                    <Setter Property="CornerRadius" Value="10,10,0,0" />
+                    <Style.Triggers>
+                        <!-- Widget: lista jako samostatny polopruhledny panel. -->
+                        <DataTrigger Binding="{Binding IsWidgetMode}" Value="True">
+                            <Setter Property="Background" Value="#E6FFFFFF" />
+                            <Setter Property="BorderBrush" Value="#80C9D2DC" />
+                            <Setter Property="BorderThickness" Value="1" />
+                            <Setter Property="CornerRadius" Value="10" />
+                            <Setter Property="Margin" Value="6,0,6,4" />
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </Border.Style>
+            <StackPanel>
+                <!-- Logo + nadpis; v rezimu widgetu se skryva (kompaktnejsi okno). -->
+                <DockPanel>
+                    <DockPanel.Style>
+                        <Style TargetType="DockPanel">
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsWidgetMode}" Value="True">
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </DockPanel.Style>
+                    <Image DockPanel.Dock="Left" Source="pack://application:,,,/Assets/app-64.png" Width="28" Height="28"
+                           Margin="0,0,10,0" VerticalAlignment="Center" RenderOptions.BitmapScalingMode="HighQuality" />
+                    <TextBlock Text="{Binding AppTitle}" Foreground="#1F2933" FontSize="18" FontWeight="SemiBold"
+                               TextWrapping="Wrap" VerticalAlignment="Center" />
+                </DockPanel>
+                <DockPanel Margin="0,2,0,0">
+                    <Ellipse DockPanel.Dock="Left" Width="8" Height="8" Fill="{Binding ConnectionBrush}" VerticalAlignment="Top" Margin="0,5,6,0" />
+                    <TextBlock Foreground="#5F6B7A" FontSize="12" TextWrapping="Wrap">
+                        <Run Text="{Binding ConnectionText, Mode=OneWay}" />
+                        <Run Text=" · " />
+                        <Run Text="{Binding LastRefreshText, Mode=OneWay}" />
+                    </TextBlock>
+                </DockPanel>
+                <!-- Zobrazi se jen pri problemu s notifikacemi (chybi trigger, prerusene spojeni). -->
+                <TextBlock Text="{Binding UpdateModeText}" Foreground="#B26A00" FontSize="12" TextWrapping="Wrap"
+                           Margin="14,2,0,0" Style="{StaticResource HideWhenEmpty}" />
+
+                <DockPanel Margin="0,10,0,0" LastChildFill="True">
+                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Top" Margin="12,0,0,0">
+                        <Button Content="&#x1F4CC;" Style="{StaticResource PinButton}" Click="Pin_Click" />
+                        <ToggleButton IsChecked="{Binding SoundEnabled}" Style="{StaticResource SoundToggle}"
+                                      ToolTip="Zvukové upozornění zapnuto / vypnuto" />
+                        <Button Content="&#x1F50A;" Style="{StaticResource IconButton}" Click="TestSound_Click"
+                                ToolTip="Přehrát zkušební zvuk alarmu" />
+                        <Button Content="Potvrdit alarm" Style="{StaticResource AlarmButton}" Click="Acknowledge_Click"
+                                ToolTip="Ztlumí aktuální alarmy, dokud nevznikne nový problém" />
+                        <!-- Minimalizace – jen v normalnim rezimu (widget patri na plochu). -->
+                        <Button Content="&#x2014;" Click="Minimize_Click" ToolTip="Minimalizovat">
+                            <Button.Style>
+                                <Style TargetType="Button" BasedOn="{StaticResource IconButton}">
+                                    <Setter Property="FontSize" Value="12" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding IsWidgetMode}" Value="True">
+                                            <Setter Property="Visibility" Value="Collapsed" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Button.Style>
+                        </Button>
+                        <!-- Zavreni aplikace (okno nema systemovy titulek). -->
+                        <Button Content="&#x2715;" Click="Close_Click" ToolTip="Zavřít aplikaci">
+                            <Button.Style>
+                                <Style TargetType="Button" BasedOn="{StaticResource IconButton}">
+                                    <Setter Property="FontSize" Value="13" />
+                                </Style>
+                            </Button.Style>
+                        </Button>
+                    </StackPanel>
+
+                    <!-- Segmentova skupina: Vse + stanice -->
+                    <Border Background="#EEF1F5" CornerRadius="16" Padding="3" HorizontalAlignment="Left" VerticalAlignment="Center">
+                        <WrapPanel>
+                            <Button Content="Vše" Style="{StaticResource SegmentButton}" Click="ShowAll_Click"
+                                    ToolTip="Zobrazit všechny stanice" />
+                            <ItemsControl ItemsSource="{Binding Stations}" ItemTemplate="{StaticResource StationToggleTemplate}">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <WrapPanel />
+                                    </ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                            </ItemsControl>
+                        </WrapPanel>
+                    </Border>
+                </DockPanel>
+            </StackPanel>
+        </Border>
+
+        <!-- Alarmovy pruh -->
+        <Border DockPanel.Dock="Top" Background="#C62828" Padding="18,8"
+                Visibility="{Binding IsAlarmActive, Converter={StaticResource BoolToVisibility}}">
+            <DockPanel>
+                <TextBlock DockPanel.Dock="Left" Text="🔔" FontSize="16" Foreground="White" Margin="0,0,10,0" VerticalAlignment="Center" />
+                <TextBlock Text="{Binding AlarmText}" Foreground="White" FontWeight="SemiBold" TextWrapping="Wrap" VerticalAlignment="Center" />
+            </DockPanel>
+        </Border>
+
+        <Grid>
+            <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                <ItemsControl Margin="6" ItemsSource="{Binding Stations}" ItemTemplate="{StaticResource StationTemplate}"
+                              HorizontalAlignment="Center">
+                    <ItemsControl.ItemContainerStyle>
+                        <Style TargetType="ContentPresenter">
+                            <Setter Property="Visibility" Value="{Binding IsVisible, Converter={StaticResource BoolToVisibility}}" />
+                        </Style>
+                    </ItemsControl.ItemContainerStyle>
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <!-- Pocet sloupcu = pocet zobrazenych stanic (max. 3); okno se sirkou prizpusobi. -->
+                            <UniformGrid Columns="{Binding DataContext.VisibleColumns, RelativeSource={RelativeSource AncestorType=Window}}"
+                                         VerticalAlignment="Top" />
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                </ItemsControl>
+            </ScrollViewer>
+
+            <TextBlock Text="Není vybrána žádná stanice – klikněte na stanici v liště nebo na „Vše“."
+                       HorizontalAlignment="Center" VerticalAlignment="Center" Margin="20,40"
+                       FontSize="15" Foreground="#5F6B7A" TextWrapping="Wrap"
+                       Visibility="{Binding HasNoVisibleStations, Converter={StaticResource BoolToVisibility}}" />
+
+            <TextBlock Text="V databázi není žádná aktivní stanice."
+                       HorizontalAlignment="Center" VerticalAlignment="Center"
+                       FontSize="15" Foreground="#5F6B7A"
+                       Visibility="{Binding HasNoStations, Converter={StaticResource BoolToVisibility}}" />
+        </Grid>
+    </DockPanel>
+    </Border>
+</Window>
