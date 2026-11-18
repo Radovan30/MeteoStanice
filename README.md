@@ -50,7 +50,9 @@ Tajné hodnoty (hesla, klíče) patří do `appsettings.Local.json` nebo do prom
 
 - Surové 10s vzorky: `GET /api/samples/export.csv?stationGuid=…&from=…&to=…` (UTC, invariantní CSV).
 - Desetiminutové agregáty: `GET /api/measurements/{stationGuid}/recent?take=…`, případně přímo tabulka `Measurements`.
-- Události stanic (výpadky napájení a Wi-Fi, poruchy senzorů): tabulka `DeviceEvents` nebo `GET /api/events/{stationGuid}/recent`.
+- Události stanic (výpadky napájení a Wi-Fi, poruchy senzorů, setup režim): tabulka `DeviceEvents` nebo `GET /api/events/{stationGuid}/recent`.
+- Diagnostika přenosu (duplicity, odmítnuté vzorky, zpoždění, ztráty ve frontách stanice, restarty): `GET /api/samples/upload-batches.csv`; u vzorků sloupec `ReceiveCount`.
+- Deník zásahů a referenční anotace (souběžné měření, přesuny, čištění, vyvolané anomálie, skutečné události): `GET /api/annotations/export.csv`. Zápis přes `POST /api/annotations` s hlavičkou `X-Admin-Key`, příklady jsou v `MeteoStanice.Api/MeteoStanice.Api.http`. Postup vedení deníku popisuje kap. 23.0 dokumentace.
 
 Raw hodnoty se nikdy nepřepisují. Korekce SPS30 se počítá jen ve výstupu API (`Corrected*`) a Monitoru.
 

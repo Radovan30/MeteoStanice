@@ -23,6 +23,11 @@ X-Api-Key: {{StationApiKey}}
   "hardwareId": "TTGO-TDISPLAY-ESP32-TEST",
   "firmwareVersion": "0.4.0",
   "locationText": "Ostrava-Poruba",
+  "bootId": "33333333-3333-3333-3333-333333333333",
+  "queuePendingCount": 6,
+  "droppedRamCount": 0,
+  "droppedFlashCount": 0,
+  "rejectedSampleCount": 0,
   "samples": [
     {
       "sequenceNumber": 20261117090000,
@@ -108,3 +113,46 @@ X-Api-Key: {{StationApiKey}}
 }
 
 ###
+
+###
+
+GET {{MeteoStanice.Api_HostAddress}}/api/samples/upload-batches.csv?from=2026-11-17T00:00:00Z&to=2026-11-19T00:00:00Z
+Accept: text/csv
+
+###
+
+GET {{MeteoStanice.Api_HostAddress}}/api/annotations?from=2026-11-01T00:00:00Z&to=2026-12-01T00:00:00Z
+Accept: application/json
+
+###
+
+POST {{MeteoStanice.Api_HostAddress}}/api/annotations
+Content-Type: application/json
+X-Admin-Key: {{AdminApiKey}}
+
+{
+  "stationGuid": "11111111-1111-1111-1111-111111111111",
+  "startsAt": "2026-11-18T17:30:00+01:00",
+  "endsAt": "2026-11-18T17:32:00+01:00",
+  "category": "InducedAnomaly",
+  "title": "Dech na SPS30",
+  "description": "Tři výdechy ze vzdálenosti 10 cm do vstupu SPS30.",
+  "affectedChannels": "pm1,pm25,pm4,pm10,humidity",
+  "author": "RN"
+}
+
+###
+
+POST {{MeteoStanice.Api_HostAddress}}/api/annotations
+Content-Type: application/json
+X-Admin-Key: {{AdminApiKey}}
+
+{
+  "stationGuid": null,
+  "startsAt": "2026-12-31T22:00:00+01:00",
+  "endsAt": "2027-01-01T03:00:00+01:00",
+  "category": "EnvironmentalEvent",
+  "title": "Silvestrovský ohňostroj",
+  "affectedChannels": "pm1,pm25,pm4,pm10",
+  "author": "RN"
+}

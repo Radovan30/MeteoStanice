@@ -620,6 +620,7 @@ namespace MeteoStanice
                     return 0;
                 }
 
+                _client.SetQueueDiagnostics(_queue.Count + _persistentQueue.Count, _queue.DroppedCount, _persistentQueue.DroppedCount, _rejectedCount);
                 if (!_client.UploadSamples(batch, persistedCount))
                 {
                     if (_client.LastUploadRejected)

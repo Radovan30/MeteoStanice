@@ -27,6 +27,12 @@ namespace MeteoStanice
         private IStationConfigurationStore _configurationStore;
         private StationConfiguration _configuration;
         private long _nextHttpAttemptTicks;
+        // Random identifier of the current boot; a new value in the API marks a station restart.
+        private string _bootId = string.Empty;
+        private int _queuePendingCount;
+        private int _droppedRamCount;
+        private int _droppedFlashCount;
+        private int _rejectedSampleCount;
 
         // True after at least one upload attempt happened.
         public bool LastUploadAttempted { get; private set; }
@@ -324,6 +330,27 @@ namespace MeteoStanice
         }
 
         /// <summary>
+        /// Sets the identifier of the current boot sent with every sample batch.
+        /// </summary>
+        public void ConfigureBoot(string bootId)
+        {
+            _bootId = bootId == null ? string.Empty : bootId;
+        }
+
+        /// <summary>
+        /// Queue state sent with the next sample batch, so the API can record data lost in the station:
+        /// samples waiting for upload, samples dropped from the full RAM queue (since boot), samples
+        /// overwritten in the full flash queue (persistent) and batches rejected by the server (since boot).
+        /// </summary>
+        public void SetQueueDiagnostics(int pendingCount, int droppedRamCount, int droppedFlashCount, int rejectedSampleCount)
+        {
+            _queuePendingCount = pendingCount;
+            _droppedRamCount = droppedRamCount;
+            _droppedFlashCount = droppedFlashCount;
+            _rejectedSampleCount = rejectedSampleCount;
+        }
+
+        /// <summary>
         /// Clears the network failure counter after the Wi-Fi link was re-established.
         /// </summary>
         public void ResetNetworkFailures()
@@ -527,7 +554,17 @@ namespace MeteoStanice
             json.Append(JsonEscape(GetFirmwareVersion()));
             json.Append("\",\"locationText\":\"");
             json.Append(JsonEscape(GetLocationText()));
-            json.Append("\",\"samples\":[");
+            json.Append("\",\"bootId\":\"");
+            json.Append(JsonEscape(_bootId));
+            json.Append("\",\"queuePendingCount\":");
+            json.Append(_queuePendingCount);
+            json.Append(",\"droppedRamCount\":");
+            json.Append(_droppedRamCount);
+            json.Append(",\"droppedFlashCount\":");
+            json.Append(_droppedFlashCount);
+            json.Append(",\"rejectedSampleCount\":");
+            json.Append(_rejectedSampleCount);
+            json.Append(",\"samples\":[");
 
             for (int index = 0; index < count; index++)
             {

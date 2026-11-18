@@ -19,6 +19,13 @@ public sealed class SensorSampleDto
 
     public DateTimeOffset CreatedAt { get; set; }
 
+    /// <summary>
+    /// Number of deliveries of this sample (1 = once).
+    /// </summary>
+    public int ReceiveCount { get; set; } = 1;
+
+    public DateTimeOffset? LastReceivedAt { get; set; }
+
     public double? TemperatureCelsius { get; set; }
 
     public double? HumidityPercent { get; set; }

@@ -99,6 +99,17 @@ public sealed class SamplesController(
             .Select(item => item.SequenceNumber)
             .ToHashSetAsync(ct);
 
+        if (existingSequences.Count > 0)
+        {
+            // Repeated delivery (e.g. the HTTP response was lost): count it on the stored sample.
+            long[] repeated = existingSequences.ToArray();
+            await dbContext.SensorSamples
+                .Where(item => item.StationId == station.Id && repeated.Contains(item.SequenceNumber))
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(item => item.ReceiveCount, item => item.ReceiveCount + 1)
+                    .SetProperty(item => item.LastReceivedAt, (DateTimeOffset?)createdAt), ct);
+        }
+
         List<DateTimeOffset> storedTimes = new(validItems.Count);
         foreach ((SensorSampleUploadItem item, long sequenceNumber) in validItems)
         {
@@ -117,6 +128,31 @@ public sealed class SamplesController(
             // LastSeenAt = time of the last newly stored record, not of a repeated (duplicate) upload.
             station.LastSeenAt = createdAt;
         }
+
+        // Transport diagnostics: every batch is logged, including fully duplicated or rejected ones.
+        List<DateTimeOffset> batchTimes = request.Samples
+            .Where(item => item.MeasuredAt != default)
+            .Select(item => item.MeasuredAt.ToUniversalTime())
+            .ToList();
+        dbContext.SampleUploadBatches.Add(new SampleUploadBatch
+        {
+            Station = station,
+            ReceivedAt = createdAt,
+            ProtocolVersion = request.ProtocolVersion,
+            FirmwareVersion = Truncate(request.FirmwareVersion, 40),
+            BootId = request.BootId,
+            ReceivedCount = request.Samples.Count,
+            StoredCount = storedTimes.Count,
+            DuplicateCount = duplicateCount,
+            RejectedCount = rejectedCount,
+            FirstMeasuredAt = batchTimes.Count > 0 ? batchTimes.Min() : null,
+            LastMeasuredAt = batchTimes.Count > 0 ? batchTimes.Max() : null,
+            MaxDelaySeconds = batchTimes.Count > 0 ? (createdAt - batchTimes.Min()).TotalSeconds : null,
+            QueuePendingCount = request.QueuePendingCount,
+            DroppedRamCount = request.DroppedRamCount,
+            DroppedFlashCount = request.DroppedFlashCount,
+            StationRejectedCount = request.RejectedSampleCount
+        });
 
         try
         {
@@ -251,11 +287,85 @@ public sealed class SamplesController(
 
         await using StreamWriter writer = new(Response.Body, new UTF8Encoding(false), 16 * 1024, leaveOpen: true);
         await writer.WriteLineAsync(
-            "Id,StationGuid,StationCode,SequenceNumber,MeasuredAtUtc,ReceivedAtUtc,TemperatureCelsius,HumidityPercent,PressureHpa,Bmp280TemperatureCelsius,Pm1,Pm25,Pm4,Pm10,NumberPm05,NumberPm1,NumberPm25,NumberPm4,NumberPm10,TypicalParticleSize,BatteryVoltage,BatteryLow,PowerSource,Sht40Status,Bmp280Status,Sps30Status,Status");
+            "Id,StationGuid,StationCode,SequenceNumber,MeasuredAtUtc,ReceivedAtUtc,ReceiveCount,LastReceivedAtUtc,TemperatureCelsius,HumidityPercent,PressureHpa,Bmp280TemperatureCelsius,Pm1,Pm25,Pm4,Pm10,NumberPm05,NumberPm1,NumberPm25,NumberPm4,NumberPm10,TypicalParticleSize,BatteryVoltage,BatteryLow,PowerSource,Sht40Status,Bmp280Status,Sps30Status,Status");
 
         await foreach (SensorSampleDto sample in query.AsAsyncEnumerable().WithCancellation(ct))
         {
             await writer.WriteLineAsync(ToCsvRow(sample));
+        }
+
+        await writer.FlushAsync(ct);
+    }
+
+    /// <summary>
+    /// Streams the transport diagnostic log (one row per received batch) as CSV:
+    /// stored, duplicated and rejected samples, upload delay, station queue state and boot identifier.
+    /// </summary>
+    [HttpGet("upload-batches.csv")]
+    public async Task ExportUploadBatchesCsv(
+        Guid? stationGuid = null,
+        DateTimeOffset? from = null,
+        DateTimeOffset? to = null,
+        CancellationToken ct = default)
+    {
+        if (!ValidateTimeRange(from, to, out string? error))
+        {
+            Response.StatusCode = StatusCodes.Status400BadRequest;
+            await Response.WriteAsJsonAsync(new { message = error }, ct);
+            return;
+        }
+
+        IQueryable<SampleUploadBatch> query = dbContext.SampleUploadBatches.AsNoTracking();
+        if (stationGuid.HasValue)
+        {
+            query = query.Where(item => item.Station.StationGuid == stationGuid.Value);
+        }
+
+        if (from.HasValue)
+        {
+            DateTimeOffset fromUtc = from.Value.ToUniversalTime();
+            query = query.Where(item => item.ReceivedAt >= fromUtc);
+        }
+
+        if (to.HasValue)
+        {
+            DateTimeOffset toUtc = to.Value.ToUniversalTime();
+            query = query.Where(item => item.ReceivedAt < toUtc);
+        }
+
+        Response.ContentType = "text/csv; charset=utf-8";
+        Response.Headers.ContentDisposition =
+            $"attachment; filename=meteostanice-upload-batches-{DateTime.UtcNow:yyyyMMdd-HHmmss}.csv";
+
+        await using StreamWriter writer = new(Response.Body, new UTF8Encoding(false), 16 * 1024, leaveOpen: true);
+        await writer.WriteLineAsync(
+            "StationCode,ReceivedAtUtc,ProtocolVersion,FirmwareVersion,BootId,ReceivedCount,StoredCount,DuplicateCount,RejectedCount,FirstMeasuredAtUtc,LastMeasuredAtUtc,MaxDelaySeconds,QueuePendingCount,DroppedRamCount,DroppedFlashCount,StationRejectedCount");
+
+        var rows = query
+            .OrderBy(item => item.ReceivedAt)
+            .Select(item => new { item, item.Station.StationCode })
+            .AsAsyncEnumerable()
+            .WithCancellation(ct);
+        await foreach (var row in rows)
+        {
+            SampleUploadBatch batch = row.item;
+            await writer.WriteLineAsync(string.Join(",",
+                Csv(row.StationCode),
+                Csv(batch.ReceivedAt.UtcDateTime.ToString("O", CultureInfo.InvariantCulture)),
+                batch.ProtocolVersion.ToString(CultureInfo.InvariantCulture),
+                Csv(batch.FirmwareVersion),
+                Csv(batch.BootId?.ToString()),
+                batch.ReceivedCount.ToString(CultureInfo.InvariantCulture),
+                batch.StoredCount.ToString(CultureInfo.InvariantCulture),
+                batch.DuplicateCount.ToString(CultureInfo.InvariantCulture),
+                batch.RejectedCount.ToString(CultureInfo.InvariantCulture),
+                Csv(batch.FirstMeasuredAt?.UtcDateTime.ToString("O", CultureInfo.InvariantCulture)),
+                Csv(batch.LastMeasuredAt?.UtcDateTime.ToString("O", CultureInfo.InvariantCulture)),
+                Number(batch.MaxDelaySeconds),
+                Integer(batch.QueuePendingCount),
+                Integer(batch.DroppedRamCount),
+                Integer(batch.DroppedFlashCount),
+                Integer(batch.StationRejectedCount)));
         }
 
         await writer.FlushAsync(ct);
@@ -297,6 +407,8 @@ public sealed class SamplesController(
             SequenceNumber = item.SequenceNumber,
             MeasuredAt = item.MeasuredAt,
             CreatedAt = item.CreatedAt,
+            ReceiveCount = item.ReceiveCount,
+            LastReceivedAt = item.LastReceivedAt,
             TemperatureCelsius = item.TemperatureCelsius,
             HumidityPercent = item.HumidityPercent,
             PressureHpa = item.PressureHpa,
@@ -354,6 +466,12 @@ public sealed class SamplesController(
             CreatedAt = createdAt
         };
 
+    private static string Truncate(string? value, int maximumLength)
+    {
+        string text = value?.Trim() ?? string.Empty;
+        return text.Length > maximumLength ? text[..maximumLength] : text;
+    }
+
     private static bool ValidateTimeRange(DateTimeOffset? from, DateTimeOffset? to, out string? error)
     {
         if (from.HasValue && to.HasValue && from.Value >= to.Value)
@@ -386,6 +504,8 @@ public sealed class SamplesController(
             sample.SequenceNumber.ToString(CultureInfo.InvariantCulture),
             Csv(sample.MeasuredAt.UtcDateTime.ToString("O", CultureInfo.InvariantCulture)),
             Csv(sample.CreatedAt.UtcDateTime.ToString("O", CultureInfo.InvariantCulture)),
+            sample.ReceiveCount.ToString(CultureInfo.InvariantCulture),
+            Csv(sample.LastReceivedAt?.UtcDateTime.ToString("O", CultureInfo.InvariantCulture)),
             Number(sample.TemperatureCelsius),
             Number(sample.HumidityPercent),
             Number(sample.PressureHpa),
@@ -407,6 +527,9 @@ public sealed class SamplesController(
             Csv(FirmwareStatusCatalog.NormalizeSensorError(sample.Bmp280Status)),
             Csv(FirmwareStatusCatalog.NormalizeSensorError(sample.Sps30Status)),
             Csv(FirmwareStatusCatalog.NormalizeRawSampleStatus(sample.Status)));
+
+    private static string Integer(int? value)
+        => value?.ToString(CultureInfo.InvariantCulture) ?? string.Empty;
 
     private static string Number(double? value)
         => value?.ToString("R", CultureInfo.InvariantCulture) ?? string.Empty;

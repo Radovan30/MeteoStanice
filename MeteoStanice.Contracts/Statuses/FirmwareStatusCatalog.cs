@@ -77,7 +77,9 @@ public enum DeviceEventCode
     LocalQueueFull = 28,
     LocalRecordCorrupted = 29,
     ConfigurationInvalid = 30,
-    ConfigurationApplied = 31
+    ConfigurationApplied = 31,
+    SetupModeEntered = 32,
+    SetupModeExited = 33
 }
 
 public sealed class StatusDefinitionDto

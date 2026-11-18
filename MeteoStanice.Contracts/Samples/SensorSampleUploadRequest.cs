@@ -20,6 +20,31 @@ public sealed class SensorSampleUploadRequest
     /// </summary>
     public string LocationText { get; set; } = string.Empty;
 
+    /// <summary>
+    /// Random identifier of the current station boot (protocol 2+); a new value marks a restart.
+    /// </summary>
+    public Guid? BootId { get; set; }
+
+    /// <summary>
+    /// Samples waiting in the station queues when the batch was sent (protocol 2+).
+    /// </summary>
+    public int? QueuePendingCount { get; set; }
+
+    /// <summary>
+    /// Samples dropped from the full RAM queue since boot (protocol 2+).
+    /// </summary>
+    public int? DroppedRamCount { get; set; }
+
+    /// <summary>
+    /// Samples overwritten in the full flash queue, persistent across restarts (protocol 2+).
+    /// </summary>
+    public int? DroppedFlashCount { get; set; }
+
+    /// <summary>
+    /// Samples the station removed after a permanent rejection by the API, since boot (protocol 2+).
+    /// </summary>
+    public int? RejectedSampleCount { get; set; }
+
     public List<SensorSampleUploadItem> Samples { get; set; } = new();
 }
 

@@ -131,7 +131,10 @@ namespace MeteoStanice
         // Configuration failed validation.
         ConfigurationInvalid = 30,
         // Configuration was saved and applied.
-        ConfigurationApplied = 31
+        ConfigurationApplied = 31,
+        // Setup mode started: the station does not measure until it ends (explains gaps in data).
+        SetupModeEntered = 32,
+        // Setup mode ended, measuring resumes.
+        SetupModeExited = 33
     }
-
 }

@@ -538,6 +538,7 @@ Součástí requestu jsou:
 - stabilní číselný identifikátor vzorku ve formátu UTC `yyyyMMddHHmmss`,
 - přesný čas vzorku,
 - textové umístění stanice (`locationText`, od protokolu 2),
+- diagnostika přenosu (od protokolu 2): `bootId` (náhodný identifikátor běhu, nová hodnota = restart stanice), `queuePendingCount` (vzorky čekající ve frontách), `droppedRamCount` (zahozené z plné RAM fronty od startu), `droppedFlashCount` (přepsané v plné flash frontě, trvale) a `rejectedSampleCount` (odstraněné po trvalém odmítnutí serverem od startu),
 - aktuální hodnoty SHT40, BMP280 a SPS30 včetně početních koncentrací (od protokolu 2), zaokrouhlené na tři desetinná místa,
 - stav každého senzoru,
 - napětí a stav baterie,
@@ -586,7 +587,12 @@ Databáze jako taková musí v PostgreSQL existovat. API automaticky vytváří 
 | POST | `/api/samples` | Dávkové uložení desetisekundových vzorků | ano, pokud je nakonfigurován |
 | GET | `/api/samples` | Stránkovaný seznam surových vzorků | ne |
 | GET | `/api/samples/latest` | Poslední vzorek každé aktivní stanice (živé hodnoty pro Monitor) | ne |
-| GET | `/api/samples/export.csv` | Export vzorků pro analýzu | ne |
+| GET | `/api/samples/export.csv` | Export vzorků pro analýzu (včetně `ReceiveCount`) | ne |
+| GET | `/api/samples/upload-batches.csv` | Export deníku přijatých dávek (duplicity, odmítnutí, zpoždění, ztráty ve stanici, restarty) | ne |
+| GET | `/api/annotations?stationGuid=&from=&to=` | Deník zásahů a referenční anotace v čase | ne |
+| GET | `/api/annotations/categories` | Povolené kategorie anotací | ne |
+| GET | `/api/annotations/export.csv` | Export anotací pro vyhodnocení detektorů | ne |
+| POST, PUT, DELETE | `/api/annotations`, `/api/annotations/{id}` | Zápis, úprava a smazání anotace | administrátorský klíč `X-Admin-Key` |
 | GET | `/api/stations` | Seznam stanic včetně verze firmwaru a SPS30 korekce | ne |
 | PUT | `/api/stations/{stationGuid}/sps30-correction` | Nastavení procentní korekce SPS30 stanice | administrátorský klíč `X-Admin-Key` (povinný) |
 | SignalR | `/hubs/meteo` | Živé oznámení o novém měření | podle současné CORS konfigurace |
@@ -654,6 +660,8 @@ erDiagram
     Stations ||--o{ SensorSamples : produces
     Stations ||--o{ DeviceEvents : reports
     Stations ||--o| StationSettings : has
+    Stations ||--o{ SampleUploadBatches : uploads
+    Stations |o--o{ StationAnnotations : annotated_by
     Measurements ||--o{ MeasurementQualityFlags : receives
     SensorChannels ||--o{ MeasurementQualityFlags : identifies_channel
     QualityChecks ||--o{ MeasurementQualityFlags : identifies_check
@@ -800,7 +808,12 @@ Je zdrojem pravdy pro analýzu a opakovatelnou backendovou agregaci. Jeden řád
 | `Sps30Status` | `varchar(32)` | Stav jednoho čtení SPS30 |
 | `Status` | `varchar(64)` | Souhrnný stav raw vzorku |
 
-Unikátní index `(StationId, SequenceNumber)` zajišťuje idempotenci opakovaného uploadu. Indexy `(StationId, MeasuredAt)` a `MeasuredAt` podporují agregaci, časové dotazy a CSV export.
+| `ReceiveCount` | `integer` | Kolikrát stanice vzorek doručila (1 = jednou; více = opakovaný upload, např. ztracená HTTP odpověď) |
+| `LastReceivedAt` | `timestamptz`, nullable | Čas posledního opakovaného doručení |
+
+Unikátní index `(StationId, SequenceNumber)` zajišťuje idempotenci opakovaného uploadu: duplicitní vzorek se znovu neuloží, jen se mu zvýší `ReceiveCount`. Indexy `(StationId, MeasuredAt)` a `MeasuredAt` podporují agregaci, časové dotazy a CSV export.
+
+Zpoždění doručení vzorku je `CreatedAt − MeasuredAt`.
 
 ### 15.5 Tabulka `DeviceEvents`
 
@@ -850,8 +863,9 @@ Firmware 0.4.0 skutečně vytváří tyto události:
 | Napájení | `MainsPowerLost`, `MainsPowerRestored`, `BatteryLow` | orientační změna zdroje nebo nízké napětí trvající alespoň 30 s |
 | Senzory | `Sht40NotDetected`, `Sht40ReadFailed`, `Sht40CrcFailed`, `Sht40Recovered`, `Bmp280NotDetected`, `Bmp280ReadFailed`, `Bmp280Recovered`, `Sps30NotDetected`, `Sps30ReadFailed`, `Sps30FanError`, `Sps30LaserError`, `Sps30Restored` | porucha po třech po sobě jdoucích chybných čteních (30 s), zotavení po prvním úspěšném čtení; `WAIT` u SPS30 se nepočítá |
 | Síť | `WifiConnectionFailed`, `WifiConnected`, `ServerUnavailable`, `ServerConnectionRestored` | ztráta a obnova Wi-Fi, kontrola serveru při startu a po setupu |
+| Konfigurace | `SetupModeEntered`, `ConfigurationApplied`, `SetupModeExited` | začátek setup režimu (měření se přeruší), uložení nové konfigurace, návrat do měření; vysvětlují mezeru v datech |
 
-Kódy `Sps30DisabledOnBattery`, `DeviceRestarted`, `BrownoutDetected`, `AuthenticationFailed`, `ClockSynchronizationFailed`, `LocalQueueNearFull`, `LocalQueueFull`, `LocalRecordCorrupted`, `ConfigurationInvalid` a `ConfigurationApplied` jsou v číselníku rezervované, ale firmware je zatím nevytváří.
+Kódy `Sps30DisabledOnBattery`, `DeviceRestarted`, `BrownoutDetected`, `AuthenticationFailed`, `ClockSynchronizationFailed`, `LocalQueueNearFull`, `LocalQueueFull`, `LocalRecordCorrupted` a `ConfigurationInvalid` jsou v číselníku rezervované, ale firmware je zatím nevytváří. Restart stanice je místo události `DeviceRestarted` vidět ze změny `BootId` v `SampleUploadBatches` a z události `DeviceStarted`. Nové kódy se do číselníku přidávají vždy na konec (`SetupModeEntered = 32`, `SetupModeExited = 33`), protože číselné hodnoty jsou součástí protokolu.
 
 Fronta událostí má jen 16 míst. Při dlouhém výpadku sítě s mnoha událostmi se nejstarší přepisují.
 
@@ -915,11 +929,71 @@ Obsahuje konkrétní zjištěný problém jednoho měření.
 
 Kombinace `(MeasurementId, SensorChannelId, QualityCheckId)` je unikátní. Jeden přepočet proto nemůže uložit tentýž typ problému pro stejný kanál dvakrát.
 
-### 15.10 Tabulka `__EFMigrationsHistory`
+### 15.10 Tabulka `SampleUploadBatches`
+
+Diagnostický deník přenosu: jeden řádek za každou přijatou dávku vzorků, včetně dávek, které obsahovaly jen duplicity nebo odmítnuté vzorky. Slouží k analýze opožděných, duplicitních a ztracených záznamů (instrukce, kap. 6).
+
+| Sloupec | Typ | Význam |
+|---|---|---|
+| `Id` | `uuid` | Primární klíč |
+| `StationId` | `uuid` | Stanice |
+| `ReceivedAt` | `timestamptz` | Čas přijetí dávky API |
+| `ProtocolVersion`, `FirmwareVersion` | `integer`, `varchar(40)` | Verze protokolu a firmwaru |
+| `BootId` | `uuid`, nullable | Identifikátor běhu stanice; změna mezi dávkami = restart |
+| `ReceivedCount` | `integer` | Počet vzorků v dávce |
+| `StoredCount` | `integer` | Nově uložené vzorky |
+| `DuplicateCount` | `integer` | Vzorky již uložené dříve nebo opakované v dávce |
+| `RejectedCount` | `integer` | Vzorky odmítnuté kvůli nevěrohodnému času |
+| `FirstMeasuredAt`, `LastMeasuredAt` | `timestamptz`, nullable | Časový rozsah vzorků v dávce |
+| `MaxDelaySeconds` | `double precision`, nullable | Největší zpoždění doručení v dávce (s) |
+| `QueuePendingCount` | `integer`, nullable | Vzorky čekající ve frontách stanice při odeslání |
+| `DroppedRamCount` | `integer`, nullable | Vzorky zahozené z plné RAM fronty od startu stanice |
+| `DroppedFlashCount` | `integer`, nullable | Vzorky přepsané v plné flash frontě (trvalý čítač) |
+| `StationRejectedCount` | `integer`, nullable | Vzorky, které stanice odstranila po trvalém odmítnutí serverem (od startu) |
+
+Index `(StationId, ReceivedAt)`. Při 6 vzorcích v dávce vzniká přibližně 1 440 řádků denně na stanici. Nárůst čítačů `Dropped*` mezi dávkami se stejným `BootId` znamená ztrátu dat ve stanici.
+
+### 15.11 Tabulka `StationAnnotations`
+
+Deník zásahů a referenční anotace (ground truth). Zapisuje se ručně přes API s administrátorským klíčem. Umožňuje odlišit skutečnou environmentální událost od poruchy senzoru nebo zásahu a slouží jako referenční označení pro vyhodnocení detektorů anomálií.
+
+| Sloupec | Typ | Význam |
+|---|---|---|
+| `Id` | `uuid` | Primární klíč |
+| `StationId` | `uuid`, nullable | Stanice; `NULL` = všechny stanice (např. smogová epizoda) |
+| `StartsAt`, `EndsAt` | `timestamptz`, `EndsAt` nullable | Období; bez konce = stále platí (např. aktuální umístění) |
+| `Category` | `varchar(40)` | Kategorie (viz níže) |
+| `Title`, `Description` | `varchar(160)`, `varchar(2000)` | Krátký název a popis |
+| `AffectedChannels` | `varchar(200)` | Dotčené kanály oddělené čárkou (`pm25,pm10`); prázdné = všechny |
+| `IsAnomaly` | `boolean` | Období se má při vyhodnocení detektorů považovat za anomálii |
+| `Author` | `varchar(80)` | Kdo záznam vytvořil |
+| `CreatedAt`, `UpdatedAt` | `timestamptz` | Čas vytvoření a změny |
+
+Kategorie a jejich výchozí `IsAnomaly`:
+
+| Kategorie | Význam | `IsAnomaly` |
+|---|---|---|
+| `Colocation` | stanice měří vedle sebe (porovnání, kalibrace) | ne |
+| `Placement` | umístění (venku/uvnitř, výška, kryt) platné od `StartsAt` | ne |
+| `Relocation` | přesun stanice | ne |
+| `Maintenance` | servisní zásah | ne |
+| `Cleaning` | čištění SPS30 nebo vstupu | ne |
+| `Calibration` | kalibrace nebo srovnání s referencí | ne |
+| `InducedAnomaly` | záměrně vyvolaná anomálie (dech, kouř, zahřátí, zakrytí, odpojení) | **ano** |
+| `SensorFault` | potvrzená porucha senzoru nebo hardwaru | **ano** |
+| `EnvironmentalEvent` | skutečná událost prostředí (smog, ohňostroj, pálení, mlha) – data jsou správná | ne |
+| `PowerIntervention` | zásah do napájení (test baterie, odpojení kabelu) | ne |
+| `NetworkIntervention` | zásah do sítě nebo serveru | ne |
+| `FirmwareUpdate` | aktualizace firmwaru | ne |
+| `Other` | ostatní | ne |
+
+Výchozí `IsAnomaly` lze v požadavku přepsat. Pro práci je důležité rozlišení `EnvironmentalEvent` (detektor statisticky odlehlou hodnotu najde, ale nejde o chybu měření) a `SensorFault`/`InducedAnomaly` (chyba nebo vyvolaná anomálie).
+
+### 15.12 Tabulka `__EFMigrationsHistory`
 
 Technická tabulka Entity Framework Core. Uchovává seznam aplikovaných migrací a neslouží k měřeným datům.
 
-### 15.11 Revize datového modelu
+### 15.13 Revize datového modelu
 
 Datový model záměrně odděluje raw vzorky, odvozené desetiminutové agregáty, události a příznaky kvality. Pro diplomovou práci jsou potřebné zejména `SensorSamples`, `Measurements`, `Stations`, `DeviceEvents` a tabulky kvality.
 
@@ -931,7 +1005,9 @@ Revize modelu v listopadu 2026 (firmware 0.4.0):
 - `Stations.LocationText` se plní z konfigurace stanice,
 - `SensorChannels.Name`/`Unit` a `QualityChecks.Description` se vyplňují z `QualityCatalog`, `QualityChecks.Enabled` se respektuje,
 - přenosový objekt `MeasurementUploadRequest` a endpoint pro příjem agregátů ze stanice byly odstraněny, protože agregáty vznikají jen na backendu,
-- `MeasurementDto` nově obsahuje `BatteryVoltage`.
+- `MeasurementDto` nově obsahuje `BatteryVoltage`,
+- `SensorSamples.ReceiveCount`/`LastReceivedAt` a tabulka `SampleUploadBatches` zachycují duplicity, odmítnutí, zpoždění, restarty a ztráty ve stanici,
+- tabulka `StationAnnotations` slouží jako deník zásahů a referenční anotace.
 
 Následující části jsou připravené pro budoucí funkce a zatím se nepoužívají:
 
@@ -1116,7 +1192,8 @@ API při startu automaticky volá `Database.Migrate()`. Aktuální migrace:
 7. `AddStationProtocolVersion` - verze komunikačního protokolu stanice,
 8. `HardenStationAndAggregationIndexes` - unikátní hardware, příznaky kvality a index událostí,
 9. `AddStationSps30Correction` - procentní korekce SPS30 uložená u stanice,
-10. `AddSampleNumberConcentrations` - početní koncentrace SPS30 v surových vzorcích.
+10. `AddSampleNumberConcentrations` - početní koncentrace SPS30 v surových vzorcích,
+11. `AddUploadDiagnosticsAndAnnotations` - `SensorSamples.ReceiveCount`/`LastReceivedAt`, tabulky `SampleUploadBatches` a `StationAnnotations`.
 
 Migrace GUID používá rozšíření PostgreSQL `pgcrypto` a `gen_random_uuid()`.
 
@@ -1140,6 +1217,8 @@ Současná omezení:
 - GET endpointy a Swagger nejsou chráněny,
 - API klíč a heslo Wi-Fi jsou uloženy ve flash v čitelné key-value konfiguraci.
 
+Zápis do deníku zásahů (`/api/annotations`) chrání administrátorský klíč, čtení je na LAN veřejné.
+
 Pro uzavřenou domácí LAN je tento stav použitelný pro vývoj. Pro vzdálený nebo veřejný provoz je nutný reverse proxy s HTTPS a omezení CORS.
 
 Poznámka k historii repozitáře: do listopadu 2026 byl v Gitu uložen connection string s heslem k databázi na NAS. Heslo je proto nutné považovat za vyzrazené a změnit ho; samotné odstranění ze souborů nestačí.
@@ -1156,7 +1235,7 @@ Stanice bez dostupného NTP serveru (například bez Wi-Fi po startu) neukládá
 
 ### 21.3 Mezery v datech
 
-Mezery vznikají při setup režimu, při ztrátě neúplného bloku po výpadku napájení (nejvýše 5 vzorků) a po přeplnění flash fronty (výpadek API delší než asi 12 h). Při analýze je potřeba je odlišit od skutečné poruchy senzoru, například podle `DeviceEvents` a počtů vzorků v `Measurements`.
+Mezery vznikají při setup režimu (označen událostmi `SetupModeEntered`/`SetupModeExited`), při ztrátě neúplného bloku po výpadku napájení (nejvýše 5 vzorků) a po přeplnění flash fronty (výpadek API delší než asi 12 h). Při analýze je potřeba je odlišit od skutečné poruchy senzoru podle `DeviceEvents`, `SampleUploadBatches` (restarty, ztráty ve frontách) a ručního deníku `StationAnnotations`.
 
 ### 21.4 Kapacita interní flash
 
@@ -1223,6 +1302,26 @@ Tři vlastní stanice lze nejdříve kolokovat a provést interkalibraci. Bez pr
 ## 23. Plán dlouhodobého statistického hodnocení
 
 Hodnocení je vhodné rozdělit podle časového horizontu.
+
+### 23.0 Rozlišení skutečné události a chyby senzoru
+
+Detekovaná odlehlá hodnota není automaticky chybné měření. Pro rozlišení systém kombinuje čtyři zdroje:
+
+1. **Stav senzoru u každého vzorku** (`Sht40Status`, `Bmp280Status`, `Sps30Status`) a příznaky napájení. Chyba komunikace nebo CRC je jednoznačně technický problém.
+2. **Události stanice** (`DeviceEvents`): poruchy a zotavení senzorů, setup režim, napájení, Wi-Fi.
+3. **Diagnostika přenosu** (`SampleUploadBatches`, `SensorSamples.ReceiveCount`): restarty, ztráty ve frontách, duplicity a zpoždění.
+4. **Ruční deník** (`StationAnnotations`): co se kdy se stanicí dělo a jaké skutečné události nastaly.
+
+Prakticky: shoda odchylky na všech třech stanicích současně ukazuje spíše na skutečnou událost (`EnvironmentalEvent`). Odchylka jediné stanice bez souvislosti s počasím ukazuje spíše na chybu (`SensorFault`).
+
+Doporučený postup vedení deníku:
+
+- Při každém zásahu (přesun, otevření krytu, čištění, odpojení kabelu, aktualizace firmwaru) zapsat anotaci s časem začátku a konce. Pokud je zápis přes API nepohodlný, stačí průběžné poznámky (čas, stanice, co se dělo) a hromadné vložení později.
+- Na začátku souběžného měření stanic na jednom místě zapsat `Colocation` a umístění každé stanice jako `Placement` (venku/uvnitř, výška nad zemí, kryt).
+- Pro vyhodnocení detektorů provést několik **řízeně vyvolaných anomálií** (`InducedAnomaly`) s přesným časem a dotčenými kanály. Příklady: krátký dech nebo kouř u SPS30 (PM), zahřátí SHT40 dlaní (teplota a vlhkost), zakrytí vstupu, odpojení senzoru (výpadek), přechod stanice na baterii.
+- Výrazné skutečné události v okolí (ohňostroj, pálení, smogová situace podle ČHMÚ, mlha) zapsat jako `EnvironmentalEvent`, případně s `StationId = null` pro všechny stanice.
+
+Export `GET /api/annotations/export.csv` pak poslouží jako referenční označení pro výpočet precision, recall a F1. Synteticky vložené vady (kap. 24) tento deník doplňují, ale nenahrazují.
 
 ### 23.1 Při každém uploadu
 

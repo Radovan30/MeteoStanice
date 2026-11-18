@@ -317,6 +317,69 @@ namespace MeteoStanice.Data.Migrations
                     b.ToTable("QualityChecks");
                 });
 
+            modelBuilder.Entity("MeteoStanice.Data.Entities.SampleUploadBatch", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("BootId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int?>("DroppedFlashCount")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("DroppedRamCount")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("DuplicateCount")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("FirmwareVersion")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.Property<DateTimeOffset?>("FirstMeasuredAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset?>("LastMeasuredAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<double?>("MaxDelaySeconds")
+                        .HasColumnType("double precision");
+
+                    b.Property<int>("ProtocolVersion")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("QueuePendingCount")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset>("ReceivedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("ReceivedCount")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("RejectedCount")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("StationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int?>("StationRejectedCount")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("StoredCount")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("StationId", "ReceivedAt");
+
+                    b.ToTable("SampleUploadBatches");
+                });
+
             modelBuilder.Entity("MeteoStanice.Data.Entities.SensorChannel", b =>
                 {
                     b.Property<int>("Id")
@@ -374,6 +437,9 @@ namespace MeteoStanice.Data.Migrations
                     b.Property<double?>("HumidityPercent")
                         .HasColumnType("double precision");
 
+                    b.Property<DateTimeOffset?>("LastReceivedAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<DateTimeOffset>("MeasuredAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -411,6 +477,9 @@ namespace MeteoStanice.Data.Migrations
 
                     b.Property<double?>("PressureHpa")
                         .HasColumnType("double precision");
+
+                    b.Property<int>("ReceiveCount")
+                        .HasColumnType("integer");
 
                     b.Property<long>("SequenceNumber")
                         .HasColumnType("bigint");
@@ -515,6 +584,64 @@ namespace MeteoStanice.Data.Migrations
                     b.ToTable("Stations");
                 });
 
+            modelBuilder.Entity("MeteoStanice.Data.Entities.StationAnnotation", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("AffectedChannels")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("Author")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.Property<string>("Category")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<DateTimeOffset?>("EndsAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("IsAnomaly")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTimeOffset>("StartsAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("StationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(160)
+                        .HasColumnType("character varying(160)");
+
+                    b.Property<DateTimeOffset?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("StartsAt");
+
+                    b.HasIndex("StationId", "StartsAt");
+
+                    b.ToTable("StationAnnotations");
+                });
+
             modelBuilder.Entity("MeteoStanice.Data.Entities.StationSetting", b =>
                 {
                     b.Property<Guid>("Id")
@@ -598,6 +725,17 @@ namespace MeteoStanice.Data.Migrations
                     b.Navigation("SensorChannel");
                 });
 
+            modelBuilder.Entity("MeteoStanice.Data.Entities.SampleUploadBatch", b =>
+                {
+                    b.HasOne("MeteoStanice.Data.Entities.Station", "Station")
+                        .WithMany()
+                        .HasForeignKey("StationId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Station");
+                });
+
             modelBuilder.Entity("MeteoStanice.Data.Entities.SensorSample", b =>
                 {
                     b.HasOne("MeteoStanice.Data.Entities.Station", "Station")
@@ -605,6 +743,16 @@ namespace MeteoStanice.Data.Migrations
                         .HasForeignKey("StationId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+
+                    b.Navigation("Station");
+                });
+
+            modelBuilder.Entity("MeteoStanice.Data.Entities.StationAnnotation", b =>
+                {
+                    b.HasOne("MeteoStanice.Data.Entities.Station", "Station")
+                        .WithMany()
+                        .HasForeignKey("StationId")
+                        .OnDelete(DeleteBehavior.SetNull);
 
                     b.Navigation("Station");
                 });

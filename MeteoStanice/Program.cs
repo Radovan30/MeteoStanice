@@ -56,6 +56,7 @@ namespace MeteoStanice
             NanoUploadClient uploadClient = new NanoUploadClient();
             uploadClient.ConfigureIdentity(identity);
             uploadClient.ConfigureConfiguration(configurationStore, configuration);
+            uploadClient.ConfigureBoot(Guid.NewGuid().ToString());
             NanoDeviceEventUploadService eventUploadService = new NanoDeviceEventUploadService(eventQueue, uploadClient);
             NanoRawSampleUploadService rawSampleUploadService = new NanoRawSampleUploadService(rawSampleQueue, persistentRawSampleQueue, uploadClient);
             NanoPowerMonitor powerMonitor = new NanoPowerMonitor();
@@ -121,7 +122,7 @@ namespace MeteoStanice
                     eventService.Report(identity.StationId, DeviceEventSeverity.Information, DeviceEventCategory.Time, DeviceEventCode.ClockSynchronized, "Clock", "Cas synchronizovan z NTP, vzorkovani aktivni.");
                 }
 
-                if (HandleSetupRequest(buttons, display, wifiHardwareDiagnostics, provisioningService, configurationStore, configurationService, identityService, rawSampleQueue, persistentRawSampleQueue, eventQueue, clockService, serverStatusService, uploadClient, uploadWorker, wifiSupervisor, ref configuration, ref identity, ref realWifiConnected, counter))
+                if (HandleSetupRequest(buttons, display, wifiHardwareDiagnostics, provisioningService, configurationStore, configurationService, identityService, rawSampleQueue, persistentRawSampleQueue, eventQueue, clockService, serverStatusService, uploadClient, uploadWorker, wifiSupervisor, eventService, ref configuration, ref identity, ref realWifiConnected, counter))
                 {
                     counter++;
                     continue;
@@ -160,7 +161,7 @@ namespace MeteoStanice
                 }
                 display.ShowSensorStatus(readSet);
 
-                if (HandleSetupRequest(buttons, display, wifiHardwareDiagnostics, provisioningService, configurationStore, configurationService, identityService, rawSampleQueue, persistentRawSampleQueue, eventQueue, clockService, serverStatusService, uploadClient, uploadWorker, wifiSupervisor, ref configuration, ref identity, ref realWifiConnected, counter))
+                if (HandleSetupRequest(buttons, display, wifiHardwareDiagnostics, provisioningService, configurationStore, configurationService, identityService, rawSampleQueue, persistentRawSampleQueue, eventQueue, clockService, serverStatusService, uploadClient, uploadWorker, wifiSupervisor, eventService, ref configuration, ref identity, ref realWifiConnected, counter))
                 {
                     counter++;
                     continue;
@@ -180,7 +181,7 @@ namespace MeteoStanice
             }
         }
 
-        private static bool HandleSetupRequest(NanoTtgoButtons buttons, NanoTtgoDisplay display, NanoWifiHardwareDiagnostics wifiHardwareDiagnostics, NanoProvisioningService provisioningService, IStationConfigurationStore configurationStore, StationConfigurationService configurationService, StationIdentityService identityService, NanoRawSampleQueue rawSampleQueue, NanoRawSamplePersistentQueue persistentRawSampleQueue, NanoDeviceEventQueue eventQueue, NanoClockService clockService, NanoServerStatusService serverStatusService, NanoUploadClient uploadClient, NanoUploadWorker uploadWorker, NanoWifiSupervisor wifiSupervisor, ref StationConfiguration configuration, ref StationIdentity identity, ref bool realWifiConnected, int counter)
+        private static bool HandleSetupRequest(NanoTtgoButtons buttons, NanoTtgoDisplay display, NanoWifiHardwareDiagnostics wifiHardwareDiagnostics, NanoProvisioningService provisioningService, IStationConfigurationStore configurationStore, StationConfigurationService configurationService, StationIdentityService identityService, NanoRawSampleQueue rawSampleQueue, NanoRawSamplePersistentQueue persistentRawSampleQueue, NanoDeviceEventQueue eventQueue, NanoClockService clockService, NanoServerStatusService serverStatusService, NanoUploadClient uploadClient, NanoUploadWorker uploadWorker, NanoWifiSupervisor wifiSupervisor, NanoDeviceEventService eventService, ref StationConfiguration configuration, ref StationIdentity identity, ref bool realWifiConnected, int counter)
         {
             if (!buttons.ConsumeSetupRequest())
             {
@@ -188,6 +189,8 @@ namespace MeteoStanice
             }
 
             Debug.WriteLine("Setup tlacitko stisknuto za behu, spoustim setup AP bez restartu.");
+            // Setup mode stops measuring; the events explain the resulting gap in the data.
+            eventService.ReportTransition(identity.StationId, DeviceEventSeverity.Information, DeviceEventCategory.Configuration, DeviceEventCode.SetupModeEntered, "Setup", "Setup rezim spusten tlacitkem, mereni preruseno.");
             uploadWorker.Pause(UploadWorkerPauseWaitMilliseconds);
             display.ShowSetup(configuration.ProvisioningAccessPointName, configuration.ProvisioningAddress);
             wifiHardwareDiagnostics.DisconnectClient();
@@ -227,6 +230,13 @@ namespace MeteoStanice
                 uploadClient.ConfigureHttp(configuration.ApiBaseUrl, configuration.ApiKey, serverStatus.State == NanoServerConnectionState.Available);
                 uploadWorker.Resume();
             }
+
+            if (provisioningResult.ConfigurationSaved)
+            {
+                eventService.ReportTransition(identity.StationId, DeviceEventSeverity.Information, DeviceEventCategory.Configuration, DeviceEventCode.ConfigurationApplied, "Setup", "Nova konfigurace ulozena a pouzita.");
+            }
+
+            eventService.ReportTransition(identity.StationId, DeviceEventSeverity.Information, DeviceEventCategory.Configuration, DeviceEventCode.SetupModeExited, "Setup", "Setup rezim ukoncen, mereni pokracuje.");
 
             if (provisioningResult.CancelledByButton)
             {

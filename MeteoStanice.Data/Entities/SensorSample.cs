@@ -67,4 +67,14 @@ public sealed class SensorSample
     /// UTC timestamp when the backend accepted the sample.
     /// </summary>
     public DateTimeOffset CreatedAt { get; set; }
+
+    /// <summary>
+    /// How many times the station delivered this sample (1 = once; more = repeated upload, e.g. lost HTTP response).
+    /// </summary>
+    public int ReceiveCount { get; set; } = 1;
+
+    /// <summary>
+    /// UTC time of the last repeated delivery; null when the sample arrived only once.
+    /// </summary>
+    public DateTimeOffset? LastReceivedAt { get; set; }
 }

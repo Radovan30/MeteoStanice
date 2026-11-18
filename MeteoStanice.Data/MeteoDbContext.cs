@@ -24,6 +24,16 @@ public sealed class MeteoDbContext(DbContextOptions<MeteoDbContext> options) : D
     public DbSet<SensorSample> SensorSamples => Set<SensorSample>();
 
     /// <summary>
+    /// Diagnostic log of received sample batches.
+    /// </summary>
+    public DbSet<SampleUploadBatch> SampleUploadBatches => Set<SampleUploadBatch>();
+
+    /// <summary>
+    /// Manual annotations (intervention log, colocation, induced anomalies, real events).
+    /// </summary>
+    public DbSet<StationAnnotation> StationAnnotations => Set<StationAnnotation>();
+
+    /// <summary>
     /// Device events.
     /// </summary>
     public DbSet<DeviceEvent> DeviceEvents => Set<DeviceEvent>();
@@ -83,6 +93,27 @@ public sealed class MeteoDbContext(DbContextOptions<MeteoDbContext> options) : D
             entity.Property(sample => sample.Bmp280Status).HasMaxLength(32);
             entity.Property(sample => sample.Sps30Status).HasMaxLength(32);
             entity.Property(sample => sample.Status).HasMaxLength(64);
+        });
+
+        modelBuilder.Entity<SampleUploadBatch>(entity =>
+        {
+            entity.HasIndex(batch => new { batch.StationId, batch.ReceivedAt });
+            entity.Property(batch => batch.FirmwareVersion).HasMaxLength(40);
+        });
+
+        modelBuilder.Entity<StationAnnotation>(entity =>
+        {
+            entity.HasIndex(annotation => annotation.StartsAt);
+            entity.HasIndex(annotation => new { annotation.StationId, annotation.StartsAt });
+            entity.Property(annotation => annotation.Category).HasMaxLength(40);
+            entity.Property(annotation => annotation.Title).HasMaxLength(160);
+            entity.Property(annotation => annotation.Description).HasMaxLength(2000);
+            entity.Property(annotation => annotation.AffectedChannels).HasMaxLength(200);
+            entity.Property(annotation => annotation.Author).HasMaxLength(80);
+            entity.HasOne(annotation => annotation.Station)
+                .WithMany()
+                .HasForeignKey(annotation => annotation.StationId)
+                .OnDelete(DeleteBehavior.SetNull);
         });
 
         modelBuilder.Entity<DeviceEvent>(entity =>
