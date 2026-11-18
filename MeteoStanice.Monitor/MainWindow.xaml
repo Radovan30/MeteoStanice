@@ -266,6 +266,8 @@
                                 Padding="9,3" VerticalAlignment="Top">
                             <TextBlock Text="{Binding HealthText}" Foreground="White" FontWeight="Bold" FontSize="11" />
                         </Border>
+                        <Button DockPanel.Dock="Right" Content="&#x1F4C8;" Style="{StaticResource IconButton}" Click="StationGraph_Click"
+                                VerticalAlignment="Top" Margin="0,-2,6,0" ToolTip="Průběh měření této stanice (1–24 h)" />
                         <StackPanel Margin="0,0,8,0">
                             <TextBlock Text="{Binding Title}" FontSize="15" FontWeight="Bold" Foreground="{Binding AccentText}" TextTrimming="CharacterEllipsis" />
                             <TextBlock Text="{Binding Subtitle}" FontSize="11" Foreground="#5F6B7A" TextTrimming="CharacterEllipsis" />
@@ -447,6 +449,8 @@
                                     </ItemsPanelTemplate>
                                 </ItemsControl.ItemsPanel>
                             </ItemsControl>
+                            <Button Content="&#x1F4C8; Graf" Style="{StaticResource SegmentButton}" Click="Graph_Click"
+                                    ToolTip="Průběh měření všech stanic za 1–24 h (výběr stanic 1/2/3 v okně grafu)" />
                         </WrapPanel>
                     </Border>
                 </DockPanel>

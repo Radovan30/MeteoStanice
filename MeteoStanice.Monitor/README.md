@@ -63,6 +63,18 @@ Poloha okna, režim widgetu a skryté stanice se ukládají do `%LOCALAPPDATA%\M
 - Patička karty ukazuje čas 10s vzorku i konec posledního 10min průměru. Horní lišta ukazuje čas posledního načtení vzorků.
 - Bez triggeru na `SensorSamples` (starší verze skriptu) se vzorky načítají jen se záložním obnovením. Spusťte aktuální `Database/monitor-notify.sql`.
 
+## Graf průběhu (1–24 h)
+
+Tlačítko **📈 Graf** v horní liště (vedle „Vše“ a stanic) otevře okno s průběhem měření všech stanic. Tlačítko 📈 v záhlaví karty otevře stejné okno jen pro danou stanici.
+
+- **Stanice 1 / 2 / 3:** přepínače v barvách stanic, lze zobrazit libovolnou kombinaci.
+- **Období:** 1 h, 2 h, 8 h, 12 h, 24 h.
+- **Grafy pod sebou:** PM2,5, PM10, teplota, relativní vlhkost a tlak přepočtený na hladinu moře, v každém jedna křivka za vybranou stanici.
+- **Data:** 10s vzorky ze `SensorSamples`, zprůměrované do oken tak, aby křivka měla nejvýše asi 360 bodů (1 h = surové 10s vzorky, 2 h = 20 s, 8 h = 80 s, 12 h = 2 min, 24 h = 4 min). PM jsou včetně korekce SPS30 stanice, tlak se přepočítává stejně jako na ukazateli (výška podle `PressureReduction`).
+- **Výpadek** delší než trojnásobek okna (nejméně 1 min) křivku přeruší, takže chybějící data nejsou spojená čarou.
+- **Najetí myší** ukáže čas a hodnoty všech zobrazených stanic.
+- **Obnova** po notifikaci o nových vzorcích, nejvýše jednou za délku průměrovacího okna (min. 10 s). Okno se nedotazuje periodicky.
+
 ## Obnovování dat
 
 Aplikace se databáze periodicky nedotazuje. Využívá mechanismus PostgreSQL **LISTEN/NOTIFY** přes knihovnu Npgsql (obdoba `SqlDependency` u SQL Serveru, která s PostgreSQL nefunguje):

@@ -22,6 +22,9 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _debounceTimer;
     private readonly DispatcherTimer? _safetyTimer;
     private readonly DispatcherTimer _liveDebounceTimer;
+    private readonly MonitorOptions _options;
+    private readonly HistoryReader _historyReader;
+    private HistoryWindow? _historyWindow;
 
     // Sirka karty (CardWidth v XAML) + okraje karty (2 x 6) a okraj mrizky (2 x 6).
     private const double CardSlotWidth = 360 + 12;
@@ -41,6 +44,8 @@ public partial class MainWindow : Window
         InitializeComponent();
         _viewModel = viewModel;
         _changeWatcher = changeWatcher;
+        _options = options;
+        _historyReader = new HistoryReader(options.ConnectionString);
         DataContext = viewModel;
         _pinning = new DesktopPinning(this);
 
@@ -82,6 +87,7 @@ public partial class MainWindow : Window
         {
             _liveDebounceTimer.Stop();
             _liveDebounceTimer.Start();
+            _historyWindow?.RequestRefresh();
         });
 
         _soundTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(5) };
@@ -150,6 +156,7 @@ public partial class MainWindow : Window
         {
             _reevaluateTimer.Stop();
             _liveDebounceTimer.Stop();
+            _historyWindow?.Close();
             _fallbackTimer.Stop();
             _soundTimer.Stop();
             _debounceTimer.Stop();
@@ -193,6 +200,55 @@ public partial class MainWindow : Window
     private void Pin_Click(object sender, RoutedEventArgs e) => SetWidgetMode(!_viewModel.IsWidgetMode);
 
     private void Close_Click(object sender, RoutedEventArgs e) => Close();
+
+    private void Graph_Click(object sender, RoutedEventArgs e) => OpenHistory(null);
+
+    private void StationGraph_Click(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.DataContext is StationViewModel station)
+        {
+            OpenHistory(station.StationId);
+        }
+    }
+
+    /// <summary>
+    /// Otevre (nebo aktivuje) okno s prubehem mereni; onlyStation = predvybrana jedina stanice.
+    /// </summary>
+    private void OpenHistory(Guid? onlyStation)
+    {
+        if (_historyWindow is not null)
+        {
+            if (onlyStation is { } stationId)
+            {
+                _historyWindow.ShowOnly(stationId);
+            }
+
+            _historyWindow.Activate();
+            return;
+        }
+
+        List<HistoryStation> stations = _viewModel.Stations
+            .Select(station => new HistoryStation(station.StationId, StationNumber(station), station.Title, station.AccentBrush))
+            .ToList();
+        _historyWindow = new HistoryWindow(_historyReader, _options, stations, onlyStation);
+        _historyWindow.Closed += (_, _) => _historyWindow = null;
+
+        // Widget je pripnuty za ostatnimi okny; graf se otevre jako samostatne okno.
+        if (!_viewModel.IsWidgetMode)
+        {
+            _historyWindow.Owner = this;
+        }
+
+        _historyWindow.Show();
+    }
+
+    private static string StationNumber(StationViewModel station)
+    {
+        System.Text.RegularExpressions.Match match = System.Text.RegularExpressions.Regex.Match(station.SortKey, @"(\d+)\s*$");
+        return match.Success && int.TryParse(match.Groups[1].Value, out int number)
+            ? number.ToString(System.Globalization.CultureInfo.InvariantCulture)
+            : station.Title;
+    }
 
     private void Minimize_Click(object sender, RoutedEventArgs e) => WindowState = WindowState.Minimized;
 
