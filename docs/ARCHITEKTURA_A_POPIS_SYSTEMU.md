@@ -225,9 +225,13 @@ Aktuální prahy:
 |---|---:|
 | Baterie je považována za přítomnou | alespoň 3,0 V |
 | Nízká baterie | méně než 3,5 V |
-| Rozlišení baterie a externího zdroje | 3,9 V |
+| Provoz na baterii (napětí pod prahem) | méně než 3,7 V |
 
-Při provozu na baterii firmware SPS30 zastaví příkazem `Stop Measurement` (`0x0104`), čímž vypne ventilátor a laser jako největší odběr. Vzorek má u SPS30 stav `DisabledOnBattery`, backend jej započítá do `Sps30BatterySkippedCount` a stav intervalu je `Sps30DisabledOnBattery`. Po návratu síťového napájení se měření znovu spustí a prvních 30 s platí náběhová doba. Přechod je zaznamenán událostmi `Sps30DisabledOnBattery` a `Sps30Restored`.
+**Detekce napájení je pouze orientační.** Zdroj se odhaduje jen z napětí článku a v noci při mrazu napětí klesá. Stanice pak může hlásit provoz na baterii nebo slabou baterii, i když je stále napájena z kabelu. Stav napájení proto **nic nemění na měření**: všechny senzory včetně SPS30 měří stále a vynechávání vzorků při přepnutí zdroje bylo odstraněno. Každý vzorek nese okamžité příznaky `powerSource` (`SRC`/`BAT`), `batteryLow` a `batteryVoltage`. Agregát s alespoň jedním vzorkem `BAT` má `PowerSource = BAT`, stav `BackupPowerActive` (pokud nemá závažnější chybu senzoru) a informační příznak kvality `BatteryContext`. Slouží jako upozornění, že s napájením nebo baterií se mohlo něco dít a hodnoty mohou být ovlivněné.
+
+Události `MainsPowerLost`, `MainsPowerRestored` a `BatteryLow` se odesílají až po změně, která vydrží tři čtení po sobě (30 s), aby kolísání napětí kolem prahu nezahltilo frontu událostí. Zpráva události obsahuje naměřené napětí.
+
+Sloupec `Sps30BatterySkippedCount` a stav `Sps30DisabledOnBattery` zůstávají kvůli starším datům. Firmware 0.4.0 SPS30 na baterii nevypíná, takže jsou vždy 0, resp. se nevyskytují.
 
 ## 6. Identita stanice
 
@@ -417,7 +421,7 @@ Displej převádí UTC na středoevropský čas podle pravidla EU: letní čas (
 
 ### 11.1 Vzorkování
 
-Hlavní smyčka provede jedno čtení všech senzorů každých 10 sekund. Stejný desetisekundový takt se používá pro vytvoření a odeslání surového vzorku. Vzorek se nevytváří, dokud není čas synchronizován z NTP (kap. 10), a jeden vzorek se vynechá při přepnutí zdroje napájení (stabilizace).
+Hlavní smyčka provede jedno čtení všech senzorů každých 10 sekund. Stejný desetisekundový takt se používá pro vytvoření a odeslání surového vzorku. Vzorek se nevytváří, dokud není čas synchronizován z NTP (kap. 10). Stav napájení vzorkování neovlivňuje (kap. 5.5).
 
 Při desetiminutovém intervalu je očekávaný počet vzorků:
 
@@ -465,8 +469,8 @@ Pokud později dorazí starší vzorek z perzistentní flash fronty, backend př
 | 2 | `Sht40ReadFailed` | Chyba SHT40 |
 | 3 | `Bmp280ReadFailed` | Chyba BMP280 |
 | 4 | `Sps30ReadFailed` | Chyba SPS30 |
-| 5 | `BackupPowerActive` | Interval proběhl na baterii |
-| 6 | `Sps30DisabledOnBattery` | SPS30 byl na baterii vypnut |
+| 5 | `BackupPowerActive` | Stanice v intervalu hlásila napájení z baterie (orientační příznak) |
+| 6 | `Sps30DisabledOnBattery` | SPS30 byl na baterii vypnut (jen starší data, firmware 0.4.0 jej nevytváří) |
 
 nanoFramework může při volání `Enum.ToString()` odeslat číselnou podobu. API proto stavy normalizuje na jména podle `FirmwareStatusCatalog`; starší záznamy mohou obsahovat řetězce `"1"` nebo `"5"`.
 
@@ -474,9 +478,9 @@ Backend určí jediný stav intervalu podle priority:
 
 1. alespoň jedno chybné čtení SHT40 → `Sht40ReadFailed`,
 2. BMP280 → `Bmp280ReadFailed`,
-3. SPS30 (chyby kromě `WAIT` a vypnutí na baterii) → `Sps30ReadFailed`,
-4. vynechané čtení SPS30 kvůli baterii → `Sps30DisabledOnBattery`,
-5. alespoň jeden vzorek na baterii → `BackupPowerActive`,
+3. SPS30 (chyby kromě `WAIT`) → `Sps30ReadFailed`,
+4. vynechané čtení SPS30 kvůli baterii (jen starší firmware) → `Sps30DisabledOnBattery`,
+5. alespoň jeden vzorek hlásí baterii → `BackupPowerActive`,
 6. méně než 50 % očekávaných vzorků (méně než 30 z 60) → `InsufficientSamples`,
 7. jinak `Ok`.
 
@@ -740,7 +744,7 @@ Tyto hodnoty backend agreguje z desetisekundových vzorků. `BatteryVoltage` je 
 | `Sps30OkCount` | `integer` | Úspěšná čtení SPS30 |
 | `Sps30WaitCount` | `integer` | SPS30 ještě neměl připravená data |
 | `Sps30ErrorCount` | `integer` | Chybná čtení SPS30 |
-| `Sps30BatterySkippedCount` | `integer` | Čtení vynechaná kvůli baterii |
+| `Sps30BatterySkippedCount` | `integer` | Čtení vynechaná kvůli baterii (jen starší firmware, nyní 0) |
 
 #### Intervalové statistiky
 
@@ -843,12 +847,11 @@ Firmware 0.4.0 skutečně vytváří tyto události:
 |---|---|---|
 | Systém | `DeviceStarted` | start firmwaru (čas může být ještě nesynchronizovaný, backend jej pak nahradí časem přijetí) |
 | Čas | `ClockSynchronized` | první úspěšná NTP synchronizace po startu |
-| Napájení | `MainsPowerLost`, `MainsPowerRestored`, `BatteryLow` | změna zdroje a nízké napětí |
-| SPS30 a napájení | `Sps30DisabledOnBattery`, `Sps30Restored` | zastavení a obnovení SPS30 při přechodu na baterii a zpět |
+| Napájení | `MainsPowerLost`, `MainsPowerRestored`, `BatteryLow` | orientační změna zdroje nebo nízké napětí trvající alespoň 30 s |
 | Senzory | `Sht40NotDetected`, `Sht40ReadFailed`, `Sht40CrcFailed`, `Sht40Recovered`, `Bmp280NotDetected`, `Bmp280ReadFailed`, `Bmp280Recovered`, `Sps30NotDetected`, `Sps30ReadFailed`, `Sps30FanError`, `Sps30LaserError`, `Sps30Restored` | porucha po třech po sobě jdoucích chybných čteních (30 s), zotavení po prvním úspěšném čtení; `WAIT` u SPS30 se nepočítá |
 | Síť | `WifiConnectionFailed`, `WifiConnected`, `ServerUnavailable`, `ServerConnectionRestored` | ztráta a obnova Wi-Fi, kontrola serveru při startu a po setupu |
 
-Kódy `DeviceRestarted`, `BrownoutDetected`, `AuthenticationFailed`, `ClockSynchronizationFailed`, `LocalQueueNearFull`, `LocalQueueFull`, `LocalRecordCorrupted`, `ConfigurationInvalid` a `ConfigurationApplied` jsou v číselníku rezervované, ale firmware je zatím nevytváří.
+Kódy `Sps30DisabledOnBattery`, `DeviceRestarted`, `BrownoutDetected`, `AuthenticationFailed`, `ClockSynchronizationFailed`, `LocalQueueNearFull`, `LocalQueueFull`, `LocalRecordCorrupted`, `ConfigurationInvalid` a `ConfigurationApplied` jsou v číselníku rezervované, ale firmware je zatím nevytváří.
 
 Fronta událostí má jen 16 míst. Při dlouhém výpadku sítě s mnoha událostmi se nejstarší přepisují.
 
@@ -958,13 +961,13 @@ Prahy v této kapitole jsou inženýrské výchozí hodnoty první verze, nikoli
 | PM10 | 0 až 700 µg/m³ |
 | Typická velikost částic | 0 až 20 µm |
 
-Chybějící průměr vytváří příznak `MissingValue`. `OutOfRange` vzniká, když je mimo rozsah průměr, **nebo minimum či maximum intervalu**. Minimum a maximum se ukládá pro teplotu, vlhkost, tlak, PM2,5 a PM10, takže jediný chybný vzorek se u těchto veličin průměrováním neskryje. U PM1, PM4 a typické velikosti částic se kontroluje jen průměr. Při provozu na baterii, kdy je SPS30 zastaven a nemá žádné platné čtení, se kontroly PM přeskakují (interval nese `BatteryContext`). Početní koncentrace se zatím na rozsah nekontrolují.
+Chybějící průměr vytváří příznak `MissingValue`. `OutOfRange` vzniká, když je mimo rozsah průměr, **nebo minimum či maximum intervalu**. Minimum a maximum se ukládá pro teplotu, vlhkost, tlak, PM2,5 a PM10, takže jediný chybný vzorek se u těchto veličin průměrováním neskryje. U PM1, PM4 a typické velikosti částic se kontroluje jen průměr. Početní koncentrace se zatím na rozsah nekontrolují.
 
 ### 16.2 Úplnost
 
 Pokud počet úspěšných čtení konkrétního senzoru nedosáhne 80 % očekávaného počtu vzorků, vznikne `LowCompleteness`.
 
-SPS30 se na úplnost nekontroluje, pokud `PowerSource` obsahuje `BAT`.
+Kontroluje se SHT40, BMP280 i SPS30, a to bez ohledu na hlášený stav napájení.
 
 ### 16.3 Flatline
 
@@ -999,7 +1002,7 @@ Při porušení vznikne `ParticleMassOrder`. SPS30 počítá hmotnostní koncent
 
 ### 16.7 Kontext baterie
 
-Měření označené zdrojem `BAT` dostane informační příznak `BatteryContext`.
+Měření označené zdrojem `BAT` dostane informační příznak `BatteryContext`. Ostatní kontroly se kvůli němu nemění. Příznak upozorňuje, že stanice hlásila problém s napájením nebo baterií; protože je detekce orientační, nejde automaticky o vadná data.
 
 ## 17. Provozní tok jednoho měření
 
@@ -1153,7 +1156,7 @@ Stanice bez dostupného NTP serveru (například bez Wi-Fi po startu) neukládá
 
 ### 21.3 Mezery v datech
 
-Mezery vznikají při setup režimu, při přepnutí zdroje napájení (jeden vzorek), při ztrátě neúplného bloku po výpadku napájení (nejvýše 5 vzorků) a po přeplnění flash fronty (výpadek API delší než asi 12 h). Při analýze je potřeba je odlišit od skutečné poruchy senzoru, například podle `DeviceEvents` a počtů vzorků v `Measurements`.
+Mezery vznikají při setup režimu, při ztrátě neúplného bloku po výpadku napájení (nejvýše 5 vzorků) a po přeplnění flash fronty (výpadek API delší než asi 12 h). Při analýze je potřeba je odlišit od skutečné poruchy senzoru, například podle `DeviceEvents` a počtů vzorků v `Measurements`.
 
 ### 21.4 Kapacita interní flash
 
@@ -1327,7 +1330,7 @@ Syntetické vady mohou zahrnovat bias, gain error, lineární drift, flatline, �
 
 ## 25. Doporučené pořadí další implementace
 
-1. Ověřit firmware 0.4.0 na hardwaru: obnovu Wi-Fi po restartu routeru, start bez sítě (žádné vzorky do NTP), zastavení a náběh SPS30 při přechodu na baterii, obnovu obou flash front po odpojení napájení a 12h provoz bez API (kapacita flash).
+1. Ověřit firmware 0.4.0 na hardwaru: obnovu Wi-Fi po restartu routeru, start bez sítě (žádné vzorky do NTP), náběh SPS30 po startu a obnovu po odpojení, chování příznaků baterie v noci, obnovu obou flash front po odpojení napájení a 12h provoz bez API (kapacita flash).
 2. Doplnit automatické testy registrace, idempotence, agregace a pravidel kvality.
 3. Připravit analytickou část (Python): export `/api/samples/export.csv`, kontrola časových značek a mezer, robustní detektory (klouzavý medián a MAD, Hampelův filtr, EWMA/CUSUM, Isolation Forest) a jejich vyhodnocení na anotovaných nebo synteticky narušených datech.
 4. Implementovat porovnání tří stanic ve stejném intervalu (medián a MAD, `CrossStationOutlier`).

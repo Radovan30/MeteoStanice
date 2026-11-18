@@ -21,11 +21,6 @@ namespace MeteoStanice
         /// Reads one SPS30 sample.
         /// </summary>
         Sps30ReadResult ReadSps30();
-
-        /// <summary>
-        /// Stops (false) or allows (true) SPS30 measurement, used to save power on battery.
-        /// </summary>
-        void SetSps30Enabled(bool enabled);
     }
 
     /// <summary>

@@ -11,7 +11,6 @@ namespace MeteoStanice
     {
         private const int SetupButtonTransitionBlockMilliseconds = 1500;
         private const int UploadWorkerPauseWaitMilliseconds = 70000;
-        private const int PowerTransitionStabilizationMilliseconds = 1200;
         private const int EventQueueCapacity = 16;
         private const int RawSampleQueueCapacity = 60;
         private const int PersistentRawSampleQueueCapacity = 4320;
@@ -67,8 +66,6 @@ namespace MeteoStanice
             NanoWifiSupervisor wifiSupervisor = new NanoWifiSupervisor(wifiHardwareDiagnostics);
             NanoSensorEventTracker sensorEventTracker = new NanoSensorEventTracker(eventService);
             int counter = 0;
-            bool hasLastBatteryActive = false;
-            bool lastBatteryActive = false;
             bool clockSyncReported = false;
             NanoUploadWorker uploadWorker = new NanoUploadWorker(eventQueue, rawSampleQueue, persistentRawSampleQueue, eventUploadService, rawSampleUploadService, uploadClient, wifiSupervisor);
 
@@ -131,25 +128,11 @@ namespace MeteoStanice
                 }
 
                 DateTime loopStartedAt = DateTime.UtcNow;
+                // The power state (battery active, low battery, voltage) is only attached to the sample
+                // and reported as an event; sampling continues unchanged because the ADC battery
+                // detection is not reliable (low cell voltage at night while still on the cable).
                 NanoPowerState powerState = powerService.ReadAndReport(identity.StationId);
-                if (hasLastBatteryActive && lastBatteryActive != powerState.BatteryActive)
-                {
-                    Debug.WriteLine("Power source changed, sensor status set to pending and one sample skipped.");
-                    display.ShowSensorPending();
-                    lastBatteryActive = powerState.BatteryActive;
-                    if (SleepUntilSetupPressed(buttons, PowerTransitionStabilizationMilliseconds))
-                    {
-                        continue;
-                    }
-
-                    counter++;
-                    continue;
-                }
-
-                hasLastBatteryActive = true;
-                lastBatteryActive = powerState.BatteryActive;
-
-                NanoSensorReadSet readSet = sensorReader.ReadCurrentSample(powerState.BatteryActive);
+                NanoSensorReadSet readSet = sensorReader.ReadCurrentSample();
 
                 // Without a synchronized clock the sample would carry a 1970 timestamp, collide with
                 // other unsynchronized samples and be silently dropped as a duplicate by the API.

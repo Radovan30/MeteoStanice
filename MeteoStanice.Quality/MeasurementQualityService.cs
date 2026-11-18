@@ -26,21 +26,14 @@ public sealed class MeasurementQualityService
         CheckRange(flags, "temperature", measurement.TemperatureCelsius, measurement.TemperatureMin, measurement.TemperatureMax, -40, 70, "Teplota je mimo fyzicky ocekavany rozsah.");
         CheckRange(flags, "humidity", measurement.HumidityPercent, measurement.HumidityMin, measurement.HumidityMax, 0, 100, "Vlhkost je mimo rozsah 0-100 %.");
         CheckRange(flags, "pressure", measurement.PressureHpa, measurement.PressureMin, measurement.PressureMax, 850, 1100, "Tlak je mimo ocekavany rozsah.");
-        if (!onBattery || measurement.Sps30OkCount > 0)
-        {
-            // On battery the SPS30 is stopped, so missing PM values are expected (BatteryContext flag).
-            CheckRange(flags, "pm1", measurement.Pm1, null, null, 0, 500, "PM1.0 je mimo ocekavany rozsah.");
-            CheckRange(flags, "pm25", measurement.Pm25, measurement.Pm25Min, measurement.Pm25Max, 0, 500, "PM2.5 je mimo ocekavany rozsah.");
-            CheckRange(flags, "pm4", measurement.Pm4, null, null, 0, 600, "PM4.0 je mimo ocekavany rozsah.");
-            CheckRange(flags, "pm10", measurement.Pm10, measurement.Pm10Min, measurement.Pm10Max, 0, 700, "PM10 je mimo ocekavany rozsah.");
-            CheckRange(flags, "typicalParticleSize", measurement.TypicalParticleSize, null, null, 0, 20, "Typicka velikost castic je mimo ocekavany rozsah.");
-        }
+        CheckRange(flags, "pm1", measurement.Pm1, null, null, 0, 500, "PM1.0 je mimo ocekavany rozsah.");
+        CheckRange(flags, "pm25", measurement.Pm25, measurement.Pm25Min, measurement.Pm25Max, 0, 500, "PM2.5 je mimo ocekavany rozsah.");
+        CheckRange(flags, "pm4", measurement.Pm4, null, null, 0, 600, "PM4.0 je mimo ocekavany rozsah.");
+        CheckRange(flags, "pm10", measurement.Pm10, measurement.Pm10Min, measurement.Pm10Max, 0, 700, "PM10 je mimo ocekavany rozsah.");
+        CheckRange(flags, "typicalParticleSize", measurement.TypicalParticleSize, null, null, 0, 20, "Typicka velikost castic je mimo ocekavany rozsah.");
         CheckCompleteness(flags, "sht40", measurement.Sht40OkCount, measurement.ExpectedSampleCount, "SHT40 ma malo platnych vzorku v intervalu.");
         CheckCompleteness(flags, "bmp280", measurement.Bmp280OkCount, measurement.ExpectedSampleCount, "BMP280 ma malo platnych vzorku v intervalu.");
-        if (!onBattery)
-        {
-            CheckCompleteness(flags, "sps30", measurement.Sps30OkCount, measurement.ExpectedSampleCount, "SPS30 ma malo platnych vzorku v intervalu.");
-        }
+        CheckCompleteness(flags, "sps30", measurement.Sps30OkCount, measurement.ExpectedSampleCount, "SPS30 ma malo platnych vzorku v intervalu.");
 
         CheckFlatline(flags, "temperature", measurement.TemperatureCelsius, measurement.TemperatureStdDev, measurement.Sht40OkCount, 0.001, "Teplota je v intervalu podezrele konstantni.");
         CheckFlatline(flags, "humidity", measurement.HumidityPercent, measurement.HumidityStdDev, measurement.Sht40OkCount, 0.001, "Vlhkost je v intervalu podezrele konstantni.");
@@ -70,7 +63,7 @@ public sealed class MeasurementQualityService
                 ChannelCode = "batteryVoltage",
                 CheckCode = "BatteryContext",
                 Severity = "Information",
-                Message = "Mereni bylo porizeno pri behu na baterii."
+                Message = "Stanice v intervalu hlasila napajeni z baterie (detekce podle napeti je orientacni, hodnoty mohou byt ovlivnene)."
             });
         }
 

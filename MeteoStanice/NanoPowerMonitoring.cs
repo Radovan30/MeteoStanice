@@ -182,9 +182,15 @@ namespace MeteoStanice
     {
         private readonly NanoPowerMonitor _powerMonitor;
         private readonly NanoDeviceEventService _eventService;
+        // A change must persist this many consecutive reads (3 x 10 s) before an event is reported.
+        // The ADC voltage near the thresholds fluctuates (for example in the cold at night), and
+        // without debouncing the 16-slot event queue would be flooded. Samples keep the raw flags.
+        private const int ReadsBeforeEvent = 3;
         private bool _hasLastState;
         private bool _lastMainsAvailable;
         private bool _lastBatteryLow;
+        private int _mainsChangeReads;
+        private int _batteryLowChangeReads;
 
         /// <summary>
         /// Creates power monitoring service.
@@ -220,25 +226,34 @@ namespace MeteoStanice
                 return state;
             }
 
-            if (_lastMainsAvailable && !state.MainsAvailable)
+            _mainsChangeReads = state.MainsAvailable != _lastMainsAvailable ? _mainsChangeReads + 1 : 0;
+            if (_mainsChangeReads >= ReadsBeforeEvent)
             {
+                _mainsChangeReads = 0;
+                _lastMainsAvailable = state.MainsAvailable;
                 _eventService.ClearActive();
-                _eventService.Report(stationId, DeviceEventSeverity.Warning, DeviceEventCategory.Power, DeviceEventCode.MainsPowerLost, "Power", "Main power lost, battery active.");
-            }
-            else if (!_lastMainsAvailable && state.MainsAvailable)
-            {
-                _eventService.ClearActive();
-                _eventService.Report(stationId, DeviceEventSeverity.Information, DeviceEventCategory.Power, DeviceEventCode.MainsPowerRestored, "Power", "Main power restored.");
+                if (state.MainsAvailable)
+                {
+                    _eventService.Report(stationId, DeviceEventSeverity.Information, DeviceEventCategory.Power, DeviceEventCode.MainsPowerRestored, "Power", "Napajeni z kabelu (podle napeti baterie " + state.BatteryVoltage.ToString("F2") + " V).");
+                }
+                else
+                {
+                    _eventService.Report(stationId, DeviceEventSeverity.Warning, DeviceEventCategory.Power, DeviceEventCode.MainsPowerLost, "Power", "Pravdepodobne napajeni z baterie (napeti " + state.BatteryVoltage.ToString("F2") + " V), detekce je orientacni.");
+                }
             }
 
-            if (!_lastBatteryLow && state.BatteryLow)
+            _batteryLowChangeReads = state.BatteryLow != _lastBatteryLow ? _batteryLowChangeReads + 1 : 0;
+            if (_batteryLowChangeReads >= ReadsBeforeEvent)
             {
-                _eventService.ClearActive();
-                _eventService.Report(stationId, DeviceEventSeverity.Warning, DeviceEventCategory.Power, DeviceEventCode.BatteryLow, "Power", "Battery voltage is low.");
+                _batteryLowChangeReads = 0;
+                _lastBatteryLow = state.BatteryLow;
+                if (state.BatteryLow)
+                {
+                    _eventService.ClearActive();
+                    _eventService.Report(stationId, DeviceEventSeverity.Warning, DeviceEventCategory.Power, DeviceEventCode.BatteryLow, "Power", "Nizke napeti baterie " + state.BatteryVoltage.ToString("F2") + " V.");
+                }
             }
 
-            _lastMainsAvailable = state.MainsAvailable;
-            _lastBatteryLow = state.BatteryLow;
             return state;
         }
     }

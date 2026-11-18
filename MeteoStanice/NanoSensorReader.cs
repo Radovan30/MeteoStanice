@@ -26,16 +26,16 @@ namespace MeteoStanice
         }
 
         /// <summary>
-        /// Reads all sensors. On battery power the SPS30 (fan and laser, the largest consumer)
-        /// is stopped and reported as DisabledOnBattery; it is restarted on mains power.
+        /// Reads all sensors. The SPS30 keeps measuring on battery as well: battery detection by ADC
+        /// is not reliable (cold nights lower the cell voltage while the station still runs from the cable),
+        /// so the power state is only attached to the sample as a flag.
         /// </summary>
-        public NanoSensorReadSet ReadCurrentSample(bool batteryActive)
+        public NanoSensorReadSet ReadCurrentSample()
         {
             NanoSensorReadSet readSet = new NanoSensorReadSet();
             readSet.SampledAt = DateTime.UtcNow;
             readSet.Sht40 = _sensors.ReadSht40();
             readSet.Bmp280 = _sensors.ReadBmp280();
-            _sensors.SetSps30Enabled(!batteryActive);
             readSet.Sps30 = _sensors.ReadSps30();
             return readSet;
         }

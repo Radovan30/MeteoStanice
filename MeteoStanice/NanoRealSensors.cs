@@ -14,7 +14,6 @@ namespace MeteoStanice
         private const byte Sht40Address = 0x44;
         private const byte Sps30Address = 0x69;
         private const ushort Sps30StartMeasurementCommand = 0x0010;
-        private const ushort Sps30StopMeasurementCommand = 0x0104;
         private const ushort Sps30ReadDataReadyCommand = 0x0202;
         private const ushort Sps30ReadMeasuredValuesCommand = 0x0300;
         private const ushort Sps30ReadDeviceStatusCommand = 0xD206;
@@ -43,7 +42,6 @@ namespace MeteoStanice
         private I2cDevice _bmp280;
         private bool _busInitialized;
         private bool _sps30Initialized;
-        private bool _sps30Enabled = true;
         private bool _sps30StatusSupported = true;
         private long _sps30RetryAfterTicks;
         private long _sps30StartedTicks;
@@ -162,15 +160,6 @@ namespace MeteoStanice
         public Sps30ReadResult ReadSps30()
         {
             Sps30ReadResult result = new Sps30ReadResult();
-            if (!_sps30Enabled)
-            {
-                result.IsSuccess = false;
-                result.Value = null;
-                result.ErrorCode = SensorErrorCode.DisabledOnBattery;
-                result.ErrorMessage = "SPS30 je pri napajeni z baterie zastaven.";
-                return result;
-            }
-
             try
             {
                 if (!_sps30Initialized && DateTime.UtcNow.Ticks < _sps30RetryAfterTicks)
@@ -251,40 +240,6 @@ namespace MeteoStanice
                 result.ErrorMessage = "SPS30 I2C cteni selhalo: " + exception.Message;
                 return result;
             }
-        }
-
-        /// <summary>
-        /// Stops the SPS30 fan and laser on battery power and allows a restart on mains power.
-        /// </summary>
-        public void SetSps30Enabled(bool enabled)
-        {
-            if (enabled == _sps30Enabled)
-            {
-                return;
-            }
-
-            _sps30Enabled = enabled;
-            if (enabled)
-            {
-                Debug.WriteLine("SPS30 povolen, mereni se znovu spusti pri dalsim cteni.");
-                return;
-            }
-
-            if (_sps30Initialized && _sps30 != null)
-            {
-                try
-                {
-                    WriteSps30Command(Sps30StopMeasurementCommand);
-                    Thread.Sleep(20);
-                    Debug.WriteLine("SPS30 mereni zastaveno kvuli napajeni z baterie.");
-                }
-                catch (Exception exception)
-                {
-                    Debug.WriteLine("SPS30 stop selhal: " + exception.Message);
-                }
-            }
-
-            ResetSps30("SPS30 zastaven");
         }
 
         private void ResetSps30(string reason)

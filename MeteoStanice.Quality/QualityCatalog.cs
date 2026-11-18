@@ -31,7 +31,7 @@ public static class QualityCatalog
         ["SuddenJump"] = "Skoková změna průměru proti bezprostředně předchozímu intervalu.",
         ["RepeatedConstant"] = "Stejný konstantní průměr ve dvou po sobě jdoucích intervalech.",
         ["ParticleMassOrder"] = "Porušené pořadí PM1 ≤ PM2,5 ≤ PM4 ≤ PM10 (indikuje poškozená data).",
-        ["BatteryContext"] = "Informace: interval proběhl alespoň částečně na baterii."
+        ["BatteryContext"] = "Informace: stanice v intervalu hlásila napájení z baterie (orientační detekce podle napětí)."
     };
 
     public static (string Name, string Unit) DescribeChannel(string code)

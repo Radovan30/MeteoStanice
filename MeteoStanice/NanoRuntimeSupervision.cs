@@ -129,7 +129,6 @@ namespace MeteoStanice
         private readonly SensorEventState _sht40 = new SensorEventState();
         private readonly SensorEventState _bmp280 = new SensorEventState();
         private readonly SensorEventState _sps30 = new SensorEventState();
-        private bool _sps30OnBattery;
 
         public NanoSensorEventTracker(NanoDeviceEventService eventService)
         {
@@ -153,23 +152,6 @@ namespace MeteoStanice
 
             bool sps30Ok = readSet.Sps30 != null && readSet.Sps30.IsSuccess;
             SensorErrorCode sps30Error = readSet.Sps30 == null ? SensorErrorCode.NotDetected : readSet.Sps30.ErrorCode;
-            if (!sps30Ok && sps30Error == SensorErrorCode.DisabledOnBattery)
-            {
-                if (!_sps30OnBattery)
-                {
-                    _sps30OnBattery = true;
-                    _eventService.ReportTransition(stationId, DeviceEventSeverity.Information, DeviceEventCategory.Power, DeviceEventCode.Sps30DisabledOnBattery, "SPS30", "SPS30 zastaven pri napajeni z baterie.");
-                }
-
-                return;
-            }
-
-            if (_sps30OnBattery)
-            {
-                _sps30OnBattery = false;
-                _eventService.ReportTransition(stationId, DeviceEventSeverity.Information, DeviceEventCategory.Power, DeviceEventCode.Sps30Restored, "SPS30", "SPS30 znovu spusten po obnoveni napajeni.");
-            }
-
             if (!sps30Ok && sps30Error == SensorErrorCode.Timeout)
             {
                 return;
