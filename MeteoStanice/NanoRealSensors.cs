@@ -14,7 +14,6 @@ namespace MeteoStanice
         private const byte Sht40Address = 0x44;
         private const byte Sps30Address = 0x69;
         private const ushort Sps30StartMeasurementCommand = 0x0010;
-        private const ushort Sps30StopMeasurementCommand = 0x0104;
         private const ushort Sps30ReadDataReadyCommand = 0x0202;
         private const ushort Sps30ReadMeasuredValuesCommand = 0x0300;
         private const ushort Sps30ReadDeviceStatusCommand = 0xD206;
@@ -252,23 +251,6 @@ namespace MeteoStanice
         }
 
         /// <summary>
-        /// Starts SPS30 measurement right after boot, so the 30 s warm-up runs while Wi-Fi and NTP
-        /// are being set up. Readings during the warm-up are reported as WAIT and not stored.
-        /// </summary>
-        public void StartSps30Measurement()
-        {
-            try
-            {
-                EnsureBus();
-                EnsureSps30();
-            }
-            catch (Exception exception)
-            {
-                Debug.WriteLine("SPS30 start po bootu selhal, dalsi pokus pri cteni: " + exception.Message);
-            }
-        }
-
-        /// <summary>
         /// Reads the SPS30 device status register about once per minute (firmware 2.2 and newer).
         /// Older sensor firmware does not support the command; the check is then disabled.
         /// </summary>
@@ -357,20 +339,6 @@ namespace MeteoStanice
             try
             {
                 _sps30 = I2cDevice.Create(new I2cConnectionSettings(BoardProfile.I2cBusId, Sps30Address, I2cBusSpeed.StandardMode));
-
-                // Measurement-Mode can only be entered from Idle-Mode (SPS30 datasheet). After a restart of
-                // the ESP32 alone the SPS30 keeps its power and is still measuring, so it is stopped first.
-                // On a cold start the stop command is a harmless no-op.
-                try
-                {
-                    WriteSps30Command(Sps30StopMeasurementCommand);
-                }
-                catch (Exception stopException)
-                {
-                    Debug.WriteLine("SPS30 stop pred startem selhal (senzor muze byt v idle): " + stopException.Message);
-                }
-
-                Thread.Sleep(100);
                 WriteSps30CommandWithWord(Sps30StartMeasurementCommand, 0x0300);
                 Thread.Sleep(50);
                 _sps30Initialized = true;

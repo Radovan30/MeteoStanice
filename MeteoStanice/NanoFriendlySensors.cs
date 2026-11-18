@@ -21,11 +21,6 @@ namespace MeteoStanice
         /// Reads one SPS30 sample.
         /// </summary>
         Sps30ReadResult ReadSps30();
-
-        /// <summary>
-        /// Starts SPS30 measurement immediately (warm-up begins); errors are retried on the next read.
-        /// </summary>
-        void StartSps30Measurement();
     }
 
     /// <summary>
