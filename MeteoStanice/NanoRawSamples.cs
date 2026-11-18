@@ -579,7 +579,9 @@ namespace MeteoStanice
     }
 
     /// <summary>
-    /// Uploads raw samples in small idempotent batches.
+    /// Uploads raw samples. Normally each fresh 10 s sample is sent directly from RAM; a backlog
+    /// (after an outage) is stored in flash and sent oldest first in batches of six. While uploads
+    /// are not possible, complete blocks of six samples are checkpointed from RAM to flash.
     /// </summary>
     public sealed class NanoRawSampleUploadService
     {
@@ -639,9 +641,31 @@ namespace MeteoStanice
                 return _persistentQueue.RemoveOldest(persistedCount);
             }
 
-            // An incomplete block remains in RAM until six ten-second samples are
-            // available. The complete block is checkpointed before HTTP upload.
-            return 0;
+            // No backlog in flash: send the fresh samples straight from RAM (normally one sample
+            // every 10 s). The flash is written only when the upload fails, which keeps flash wear low.
+            int ramCount = _queue.CopyOldest(batch, maximum);
+            if (ramCount == 0)
+            {
+                return 0;
+            }
+
+            _client.SetQueueDiagnostics(_queue.Count, _queue.DroppedCount, _persistentQueue.DroppedCount, _rejectedCount);
+            if (!_client.UploadSamples(batch, ramCount))
+            {
+                if (_client.LastUploadRejected)
+                {
+                    int removed = _queue.RemoveOldest(ramCount);
+                    _rejectedCount += removed;
+                    Debug.WriteLine("Raw samples odmitnuty serverem (HTTP " + _client.LastHttpStatusCode + "), odstraneno z RAM: " + removed + ", celkem odmitnuto=" + _rejectedCount);
+                    return 0;
+                }
+
+                // Server or network unavailable: keep the samples persistently until it works again.
+                CheckpointRamQueue(true);
+                return 0;
+            }
+
+            return _queue.RemoveOldest(ramCount);
         }
 
         private void CheckpointRamQueue(bool includeIncompleteBlock)

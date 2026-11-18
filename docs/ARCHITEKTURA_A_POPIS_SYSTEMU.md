@@ -120,7 +120,7 @@ Obsahuje první vrstvu automatické kontroly dat založenou na explicitních pra
 
 ### 4.6 Projekt `MeteoStanice.Monitor`
 
-Funkční WPF monitor čte PostgreSQL v režimu pouze pro čtení (10min agregáty, události, příznaky kvality) a každých 10 s endpoint `GET /api/samples/latest`, ze kterého zobrazuje poslední 10s vzorek každé stanice. Vyhodnocuje dostupnost stanic a senzorové problémy (z 10min agregátů) a spouští zvukové alarmy. Hmotnostní koncentrace SPS30 pro zobrazení upravuje podle `Stations.Sps30CorrectionPercent`; raw databázové hodnoty nemění.
+Funkční WPF monitor čte PostgreSQL v režimu pouze pro čtení: 10min agregáty, události, příznaky kvality a poslední 10s vzorek každé stanice. Vše se načítá po notifikaci PostgreSQL LISTEN/NOTIFY (triggery z `Database/monitor-notify.sql`, vzorky s vlastním payloadem `SensorSamples`), bez periodického dotazování. Vyhodnocuje dostupnost stanic a senzorové problémy (z 10min agregátů) a spouští zvukové alarmy. Hmotnostní koncentrace SPS30 pro zobrazení upravuje podle `Stations.Sps30CorrectionPercent`; raw databázové hodnoty nemění.
 
 ### 4.7 Projekt `MeteoStanice.Web`
 
@@ -502,7 +502,7 @@ Firmware používá krátký RAM staging pro surové vzorky a dvě samostatné p
 | Surové vzorky v RAM | 60 | Neúplný blok aktuálních 10sekundových vzorků |
 | Surové vzorky ve flash | 4320 | Přibližně 12 hodin při intervalu 10 sekund |
 
-Displej ukazuje počet čekajících vzorků (RAM i flash) na třech znacích: `Q00` až `Q99`, potom `100` až `999` a nad tisíc `1k0` až `9k9` (tisíce a stovky, např. `4k3` = asi 4 300 vzorků). `D..` červeně znamená vzorky zahozené z plné RAM fronty od startu. Vzorek se z flash fronty odstraní hned po potvrzení serveru (HTTP 2xx). Nahromaděnou frontu worker odesílá rychlostí asi 6 vzorků za 5 s, tedy zhruba 70 za minutu, zatímco nové vznikají rychlostí 6 za minutu. Fronta 4 320 vzorků (12 h) se tak vyprázdní asi za hodinu.
+Displej ukazuje počet čekajících vzorků (RAM i flash) na třech znacích: `Q00` až `Q99`, potom `100` až `999` a nad tisíc `1k0` až `9k9` (tisíce a stovky, např. `4k3` = asi 4 300 vzorků). `D..` červeně znamená vzorky zahozené z plné RAM fronty od startu. Vzorek se z fronty odstraní hned po potvrzení serveru (HTTP 2xx). Při běžném provozu je na displeji `Q00` nebo `Q01`, protože každý vzorek odchází hned. Nahromaděnou frontu po výpadku worker odesílá v dávkách po šesti s pauzou 1 s, tedy řádově stovky vzorků za minutu. Fronta 4 320 vzorků (12 h) se tak vyprázdní zhruba za 15–30 minut podle odezvy API.
 
 Záznam vzorku ve flash má od firmwaru 0.4.0 pevnou délku 96 B (formát verze 2). Měřené hodnoty se ukládají jako 32bitová čísla s plovoucí čárkou, protože senzory vyšší přesnost nedodávají. Plná fronta tak zabere asi 415 kB. Soubor s jinou verzí formátu se při startu založí znovu. **Před nahráním nového firmwaru je proto vhodné nechat frontu vyprázdnit** (na displeji `Q00`). Kapacitu interního souborového systému je potřeba ověřit dlouhodobým testem bez sítě (kap. 25).
 
@@ -513,11 +513,11 @@ Chování workeru:
 - nejprve nechá `NanoWifiSupervisor` ověřit a případně obnovit Wi-Fi; bez spojení se upload nezkouší,
 - při prázdných frontách čeká 1 sekundu,
 - zpracuje události a surové vzorky,
-- po šesti vzorcích přesune celý minutový blok z RAM do flash,
-- při chybě uploadu uloží do flash okamžitě také neúplný blok,
-- u surových vzorků odesílá záznamy z flash v pořadí od nejstaršího,
+- **běžný provoz:** každý nový 10s vzorek odešle hned přímo z RAM (dávka 1 vzorku) a do flash nic nezapisuje,
+- při chybě uploadu uloží do flash všechny vzorky z RAM; dokud upload nejde, přesouvá z RAM do flash celé bloky po šesti vzorcích,
+- je-li ve flash fronta (po výpadku), odesílá nejdřív ji, v pořadí od nejstaršího a v dávkách po šesti; nové vzorky z RAM čekají, takže pořadí zůstane zachované,
 - událost zapisuje do flash ihned při jejím vzniku,
-- po úspěchu čeká 5 sekund,
+- po úspěchu čeká 1 sekundu,
 - po neúspěchu čeká 60 sekund,
 - samotný HTTP klient má navíc 30sekundový backoff,
 - záznam se z fronty odstraní po HTTP odpovědi 2xx,
@@ -526,7 +526,7 @@ Chování workeru:
 
 Endpoint `/api/samples` vrací vždy HTTP 200 se souhrnem (`storedCount`, `duplicateCount`, `rejectedCount`), endpoint událostí vrací 201 pro novou a 200 pro již uloženou událost. Hodnoty NaN a nekonečno firmware odesílá jako `null`, protože by jinak vznikl neplatný JSON a odmítnutí celé dávky.
 
-Surové vzorky se zapisují do flash po blocích šesti záznamů. Tím je omezen počet aktualizací hlavičky fronty a při náhlém výpadku napájení je ohrožen pouze aktuální neúplný blok, tedy nejvýše přibližně jedna minuta dat. Po neúspěšném HTTP pokusu se uloží i tento neúplný blok. Po restartu se obě flash fronty obnoví a odešlou. Záznam se odstraní pouze po HTTP odpovědi 2xx.
+Do flash se surové vzorky zapisují jen tehdy, když odeslání selže nebo není spojení. Tím se šetří interní flash. Při běžném provozu je při náhlém výpadku napájení ohrožen jen vzorek, který ještě nestihl odejít (řádově jeden). Bez spojení se zapisují bloky po šesti vzorcích, takže při výpadku napájení může zmizet nejvýše pět vzorků z neúplného bloku. Po restartu se obě flash fronty obnoví a odešlou. Záznam se odstraní pouze po HTTP odpovědi 2xx.
 
 Události mají samostatný soubor `I:\meteo.events.queue`. Každá událost se ukládá okamžitě a nese stabilní `EventGuid`. Při potvrzení API firmware ověří, že z čela fronty odstraňuje právě potvrzený GUID. Surové vzorky používají soubor `I:\meteo.samples.queue`. Po zaplnění kruhové fronty se přepíše nejstarší záznam a zvýší se počitadlo zahozených položek.
 
@@ -594,7 +594,7 @@ Databáze jako taková musí v PostgreSQL existovat. API automaticky vytváří 
 | GET | `/api/events/{stationGuid}/recent?take=100` | Poslední události stanice | ne |
 | POST | `/api/samples` | Dávkové uložení desetisekundových vzorků | ano, pokud je nakonfigurován |
 | GET | `/api/samples` | Stránkovaný seznam surových vzorků | ne |
-| GET | `/api/samples/latest` | Poslední vzorek každé aktivní stanice (živé hodnoty pro Monitor) | ne |
+| GET | `/api/samples/latest` | Poslední vzorek každé aktivní stanice (pro budoucí dashboard; Monitor čte vzorky přímo z DB) | ne |
 | GET | `/api/samples/export.csv` | Export vzorků pro analýzu (včetně `ReceiveCount`) | ne |
 | GET | `/api/samples/upload-batches.csv` | Export deníku přijatých dávek (duplicity, odmítnutí, zpoždění, ztráty ve stanici, restarty) | ne |
 | GET | `/api/annotations?stationGuid=&from=&to=` | Deník zásahů a referenční anotace v čase | ne |
@@ -656,7 +656,7 @@ Tato část je připravena pro budoucí živý dashboard. Přepočet bez nových
 
 Příjem nového vzorku i periodický worker mohou požadovat přepočet stejného desetiminutového intervalu. Přepočet proto běží v databázové transakci chráněné PostgreSQL advisory zámkem `pg_advisory_xact_lock`. V jednu chvíli mění agregaci a její příznaky kvality pouze jeden proces. SignalR oznámení se odesílá až po potvrzení transakce.
 
-Pozdě doručený vzorek z flash fronty znovu sestaví příslušný interval i oba sousední intervaly, protože kontrola skoku porovnává sousední intervaly. Primárním zdrojem pro přepočet je vždy tabulka `SensorSamples`, nikoliv předchozí hodnota agregátu. Periodický worker uzavírá předchozí interval 15 s po hranici desetiminutového okna i u stanice, která přestala vysílat.
+Vzorek doručený včas, tedy do ještě otevřeného intervalu, přepočet nevyvolá. Interval uzavře periodický worker, takže odesílání každých 10 s nezpůsobí transakci přepočtu při každém požadavku. Pozdě doručený vzorek z flash fronty (jeho interval je už uzavřený) znovu sestaví svůj interval a interval následující, protože kontrola skoku porovnává interval s předchozím. Primárním zdrojem pro přepočet je vždy tabulka `SensorSamples`, nikoliv předchozí hodnota agregátu. Periodický worker uzavírá předchozí interval 15 s po hranici desetiminutového okna i u stanice, která přestala vysílat.
 
 ## 15. Databázový model
 
@@ -1233,9 +1233,9 @@ Poznámka k historii repozitáře: do listopadu 2026 byl v Gitu uložen connecti
 
 ## 21. Současná známá omezení
 
-### 21.1 Neúplný minutový blok
+### 21.1 Vzorky v RAM při výpadku napájení
 
-Události jsou perzistentní okamžitě a surové vzorky po blocích šesti položek. Náhlé odpojení napájení ještě před dokončením bloku může ztratit nejvýše aktuálních pět desetisekundových vzorků. Jde o záměrný kompromis mezi odolností a životností interní flash. Pro nulovou ztrátu by bylo nutné zapisovat každý vzorek nebo použít externí FRAM či SD kartu.
+Události jsou perzistentní okamžitě. Surové vzorky jdou při běžném provozu z RAM rovnou na server a do flash se ukládají jen při nedostupném serveru, a to po blocích šesti položek. Náhlé odpojení napájení tak může ztratit vzorek, který ještě nestihl odejít, a bez spojení nejvýše pět vzorků z neúplného bloku. Jde o záměrný kompromis mezi odolností a životností interní flash. Pro nulovou ztrátu by bylo nutné zapisovat každý vzorek nebo použít externí FRAM či SD kartu.
 
 ### 21.2 Měření bez synchronizace času
 
@@ -1455,7 +1455,7 @@ Aktuálně je funkční hlavní vertikální řetězec:
 reálné senzory
 -> ESP32 (vzorkování až po NTP synchronizaci, dohled nad Wi-Fi)
 -> časově zarovnané 10s vzorky včetně početních koncentrací SPS30
--> minutový RAM staging a perzistentní flash fronta surových vzorků
+-> odeslání každého vzorku hned, flash fronta surových vzorků při výpadku
 -> perzistentní flash fronta událostí
 -> HTTP API
 -> automatická registrace stanice

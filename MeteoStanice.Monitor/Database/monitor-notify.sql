@@ -38,9 +38,18 @@ CREATE TRIGGER meteo_monitor_notify
     AFTER INSERT OR UPDATE OR DELETE ON "MeasurementQualityFlags"
     FOR EACH STATEMENT EXECUTE FUNCTION meteo_monitor_notify();
 
+-- Stations: LastSeenAt se meni pri kazdem uploadu (co 10 s), proto trigger reaguje jen na zmeny
+-- sloupcu, ktere monitor zobrazuje (EF Core v UPDATE nastavuje jen skutecne zmenene sloupce).
 DROP TRIGGER IF EXISTS meteo_monitor_notify ON "Stations";
 CREATE TRIGGER meteo_monitor_notify
-    AFTER INSERT OR UPDATE OR DELETE ON "Stations"
+    AFTER INSERT OR DELETE OR UPDATE OF "StationCode", "Name", "LocationText", "IsActive", "FirmwareVersion", "Sps30CorrectionPercent"
+    ON "Stations"
+    FOR EACH STATEMENT EXECUTE FUNCTION meteo_monitor_notify();
+
+-- SensorSamples: nove 10s vzorky; monitor podle payloadu "SensorSamples" nacte jen posledni vzorky.
+DROP TRIGGER IF EXISTS meteo_monitor_notify ON "SensorSamples";
+CREATE TRIGGER meteo_monitor_notify
+    AFTER INSERT ON "SensorSamples"
     FOR EACH STATEMENT EXECUTE FUNCTION meteo_monitor_notify();
 
 DROP TRIGGER IF EXISTS meteo_monitor_notify ON "StationSettings";
@@ -55,5 +64,6 @@ CREATE TRIGGER meteo_monitor_notify
 -- DROP TRIGGER IF EXISTS meteo_monitor_notify ON "MeasurementQualityFlags";
 -- DROP TRIGGER IF EXISTS meteo_monitor_notify ON "Stations";
 -- DROP TRIGGER IF EXISTS meteo_monitor_notify ON "StationSettings";
+-- DROP TRIGGER IF EXISTS meteo_monitor_notify ON "SensorSamples";
 -- DROP FUNCTION IF EXISTS meteo_monitor_notify();
 -- ---------------------------------------------------------------------

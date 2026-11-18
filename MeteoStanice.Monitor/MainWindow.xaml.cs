@@ -21,7 +21,7 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _soundTimer;
     private readonly DispatcherTimer _debounceTimer;
     private readonly DispatcherTimer? _safetyTimer;
-    private readonly DispatcherTimer _liveTimer;
+    private readonly DispatcherTimer _liveDebounceTimer;
 
     // Sirka karty (CardWidth v XAML) + okraje karty (2 x 6) a okraj mrizky (2 x 6).
     private const double CardSlotWidth = 360 + 12;
@@ -56,7 +56,11 @@ public partial class MainWindow : Window
 
         // Zaloha: spousti se jen, kdyz notifikace nejsou k dispozici.
         _fallbackTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(options.FallbackRefreshSeconds) };
-        _fallbackTimer.Tick += async (_, _) => await _viewModel.RefreshAsync();
+        _fallbackTimer.Tick += async (_, _) =>
+        {
+            await _viewModel.RefreshAsync();
+            await _viewModel.RefreshLiveAsync();
+        };
 
         // Pojistka: obcasne uplne nacteni i pri fungujicich notifikacich (kdyby se nejaka notifikace ztratila).
         if (options.SafetyRefreshMinutes > 0)
@@ -65,9 +69,20 @@ public partial class MainWindow : Window
             _safetyTimer.Tick += async (_, _) => await _viewModel.RefreshAsync();
         }
 
-        // Zive 10s hodnoty z GET /api/samples/latest (jen kdyz je nastaveno Monitor:ApiBaseUrl).
-        _liveTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(options.LiveRefreshSeconds) };
-        _liveTimer.Tick += async (_, _) => await _viewModel.RefreshLiveAsync();
+        // Posledni 10s vzorky: nacitaji se po notifikaci "SensorSamples" (vzorky tri stanic prichazeji
+        // tesne po sobe – sloucit do jednoho nacteni), bez periodickeho dotazovani.
+        _liveDebounceTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(300) };
+        _liveDebounceTimer.Tick += async (_, _) =>
+        {
+            _liveDebounceTimer.Stop();
+            await _viewModel.RefreshLiveAsync();
+        };
+
+        _changeWatcher.SamplesChanged += () => Dispatcher.InvokeAsync(() =>
+        {
+            _liveDebounceTimer.Stop();
+            _liveDebounceTimer.Start();
+        });
 
         _soundTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(5) };
         _soundTimer.Tick += (_, _) => _viewModel.SoundTick();
@@ -114,11 +129,7 @@ public partial class MainWindow : Window
             AdjustWidthToStations();
 
             await _viewModel.RefreshAsync();
-            if (_viewModel.LiveEnabled)
-            {
-                await _viewModel.RefreshLiveAsync();
-                _liveTimer.Start();
-            }
+            await _viewModel.RefreshLiveAsync();
 
             _reevaluateTimer.Start();
             _fallbackTimer.Start(); // zastavi se, jakmile se potvrdi LISTEN/NOTIFY
@@ -138,7 +149,7 @@ public partial class MainWindow : Window
         Closed += async (_, _) =>
         {
             _reevaluateTimer.Stop();
-            _liveTimer.Stop();
+            _liveDebounceTimer.Stop();
             _fallbackTimer.Stop();
             _soundTimer.Stop();
             _debounceTimer.Stop();

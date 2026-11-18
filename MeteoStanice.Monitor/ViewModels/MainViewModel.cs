@@ -8,10 +8,10 @@ using MeteoStanice.Monitor.Services;
 namespace MeteoStanice.Monitor.ViewModels;
 
 /// <summary>
-/// Hlavni view model: cte DB (10min agregaty, udalosti, priznaky kvality) a API (posledni 10s vzorky),
-/// aktualizuje karty stanic a ridi alarm.
+/// Hlavni view model: cte DB (10min agregaty, udalosti, priznaky kvality a posledni 10s vzorky
+/// po notifikaci z triggeru), aktualizuje karty stanic a ridi alarm.
 /// </summary>
-public sealed class MainViewModel(MonitorOptions options, StationDataReader reader, AlarmService alarms, LiveSampleClient? liveClient) : ObservableObject
+public sealed class MainViewModel(MonitorOptions options, StationDataReader reader, AlarmService alarms) : ObservableObject
 {
     private const string DatabaseAlarmKey = "db";
     private static readonly CultureInfo Czech = CultureInfo.GetCultureInfo("cs-CZ");
@@ -37,7 +37,8 @@ public sealed class MainViewModel(MonitorOptions options, StationDataReader read
     private string _databaseError = string.Empty;
     private bool _isLiveRefreshing;
     private Dictionary<Guid, SensorSampleDto> _liveByStationGuid = [];
-    private string _liveStatusText = liveClient is null ? "živé 10s hodnoty vypnuty (Monitor:ApiBaseUrl)" : "čekám na živá data z API…";
+    private bool _livePending;
+    private string _liveStatusText = options.ShowLiveSamples ? "čekám na 10s vzorky…" : "10s vzorky vypnuty (Monitor:ShowLiveSamples)";
 
     /// <summary>Karty stanic.</summary>
     public ObservableCollection<StationViewModel> Stations { get; } = [];
@@ -51,11 +52,11 @@ public sealed class MainViewModel(MonitorOptions options, StationDataReader read
     /// <summary>Cas posledniho obnoveni.</summary>
     public string LastRefreshText { get => _lastRefreshText; private set => SetProperty(ref _lastRefreshText, value); }
 
-    /// <summary>Stav cteni zivych 10s vzorku z API.</summary>
+    /// <summary>Stav cteni poslednich 10s vzorku.</summary>
     public string LiveStatusText { get => _liveStatusText; private set => SetProperty(ref _liveStatusText, value); }
 
-    /// <summary>Jsou nakonfigurovana ziva data z API.</summary>
-    public bool LiveEnabled => liveClient is not null;
+    /// <summary>Zobrazuji se posledni 10s vzorky.</summary>
+    public bool LiveEnabled => options.ShowLiveSamples;
 
     /// <summary>Nazev aplikace (zahlavi, titulek okna).</summary>
     public string AppTitle => options.AppTitle;
@@ -211,29 +212,34 @@ public sealed class MainViewModel(MonitorOptions options, StationDataReader read
     }
 
     /// <summary>
-    /// Nacte posledni 10s vzorek kazde stanice z API a prekresli ukazatele. Volat z UI vlakna.
-    /// Stav stanic a alarmy chyb se dal vyhodnocuji z 10min agregatu v DB.
+    /// Nacte posledni 10s vzorek kazde stanice z DB (po notifikaci "SensorSamples") a prekresli ukazatele.
+    /// Volat z UI vlakna. Stav stanic a alarmy chyb se dal vyhodnocuji z 10min agregatu.
     /// </summary>
     public async Task RefreshLiveAsync()
     {
-        if (liveClient is null || _isLiveRefreshing)
+        if (!options.ShowLiveSamples)
         {
             return;
         }
 
+        if (_isLiveRefreshing)
+        {
+            _livePending = true;
+            return;
+        }
+
         _isLiveRefreshing = true;
+        _livePending = false;
         try
         {
-            IReadOnlyList<SensorSampleDto> samples = await liveClient.ReadLatestAsync(CancellationToken.None);
-            _liveByStationGuid = samples
-                .GroupBy(sample => sample.StationGuid)
-                .ToDictionary(group => group.Key, group => group.OrderByDescending(sample => sample.MeasuredAt).First());
-            LiveStatusText = $"živá data z API {DateTime.Now.ToString("HH:mm:ss", Czech)}";
+            using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(10));
+            _liveByStationGuid = await reader.ReadLatestSamplesAsync(timeout.Token);
+            LiveStatusText = $"10s vzorky {DateTime.Now.ToString("HH:mm:ss", Czech)}";
         }
         catch (Exception ex)
         {
             _liveByStationGuid = [];
-            LiveStatusText = $"API nedostupné ({ex.GetBaseException().Message}) – zobrazeny 10min průměry";
+            LiveStatusText = $"10s vzorky nelze načíst ({ex.GetBaseException().Message}) – zobrazeny 10min průměry";
         }
         finally
         {
@@ -244,6 +250,11 @@ public sealed class MainViewModel(MonitorOptions options, StationDataReader read
         {
             ApplySnapshots(_lastSnapshots, DateTimeOffset.UtcNow);
             UpdateAlarms();
+        }
+
+        if (_livePending)
+        {
+            await RefreshLiveAsync();
         }
     }
 

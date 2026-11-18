@@ -29,16 +29,24 @@ public sealed class SensorSampleAggregationService(
         IEnumerable<DateTimeOffset> sampleTimes,
         CancellationToken ct)
     {
+        // Only a sample of an already closed interval (late delivery from the flash queue) changes a
+        // stored aggregate: rebuild its interval and the following one (whose jump check compares with it).
+        // A sample of the still open interval needs no rebuild; the periodic worker closes the interval.
+        // With one upload every 10 s per station this avoids a rebuild transaction on every request.
+        DateTimeOffset now = DateTimeOffset.UtcNow;
         HashSet<DateTimeOffset> intervalStarts = [];
         foreach (DateTimeOffset sampleTime in sampleTimes)
         {
             DateTimeOffset currentStart = AlignIntervalStart(sampleTime);
+            if (currentStart.Add(Interval) > now)
+            {
+                continue;
+            }
+
             intervalStarts.Add(currentStart);
-            intervalStarts.Add(currentStart.Subtract(Interval));
             intervalStarts.Add(currentStart.Add(Interval));
         }
 
-        DateTimeOffset now = DateTimeOffset.UtcNow;
         foreach (DateTimeOffset intervalStart in intervalStarts.OrderBy(value => value))
         {
             DateTimeOffset intervalEnd = intervalStart.Add(Interval);

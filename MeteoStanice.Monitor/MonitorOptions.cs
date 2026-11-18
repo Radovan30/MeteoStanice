@@ -11,22 +11,17 @@ public sealed class MonitorOptions
     public string ConnectionString { get; set; } = string.Empty;
 
     /// <summary>
-    /// Zakladni URL API (napr. http://192.168.0.102:32778/api). Pokud je vyplnena, Monitor kazdych
-    /// LiveRefreshSeconds cte GET /api/samples/latest a ukazatele zobrazuji posledni 10s vzorek.
-    /// Prazdna hodnota = zobrazuji se jen 10min agregaty z databaze.
+    /// Ukazatele zobrazuji posledni 10s vzorek z tabulky SensorSamples. Nacita se po notifikaci
+    /// z triggeru na SensorSamples (Database/monitor-notify.sql), bez periodickeho dotazovani.
+    /// False = zobrazuji se jen 10min agregaty.
     /// </summary>
-    public string ApiBaseUrl { get; set; } = string.Empty;
-
-    /// <summary>
-    /// Perioda cteni poslednich vzorku z API v sekundach.
-    /// </summary>
-    public int LiveRefreshSeconds { get; set; } = 10;
+    public bool ShowLiveSamples { get; set; } = true;
 
     /// <summary>
     /// Nejvyssi stari posledniho vzorku, ktery se jeste zobrazi jako aktualni (sekundy).
-    /// Stanice odesila vzorky po minutovych blocich, proto vychozi 180 s.
+    /// Stanice odesila kazdy vzorek hned (co 10 s); starsi vzorek znamena vypadek.
     /// </summary>
-    public int LiveMaxAgeSeconds { get; set; } = 180;
+    public int LiveMaxAgeSeconds { get; set; } = 120;
 
     /// <summary>
     /// Perioda prepocitani stari dat v sekundach (bez dotazu do DB) – kvuli detekci vypadku stanice.
@@ -109,7 +104,6 @@ public sealed class MonitorOptions
     public void ApplyDefaults()
     {
         ReevaluateIntervalSeconds = Math.Max(5, ReevaluateIntervalSeconds);
-        LiveRefreshSeconds = Math.Max(5, LiveRefreshSeconds);
         LiveMaxAgeSeconds = Math.Max(30, LiveMaxAgeSeconds);
         FallbackRefreshSeconds = Math.Max(10, FallbackRefreshSeconds);
         if (string.IsNullOrWhiteSpace(NotifyChannel))

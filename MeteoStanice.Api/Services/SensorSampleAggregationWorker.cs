@@ -45,10 +45,11 @@ public sealed class SensorSampleAggregationWorker(
             .Where(item => item.IsActive)
             .ToListAsync(ct);
 
-        DateTimeOffset now = DateTimeOffset.UtcNow;
+        // A time inside the just closed interval: rebuilds that interval (the open one is skipped).
+        DateTimeOffset previousInterval = DateTimeOffset.UtcNow.Subtract(Interval);
         foreach (Station station in stations)
         {
-            await aggregationService.RebuildAffectedIntervalsAsync(station, [now], ct);
+            await aggregationService.RebuildAffectedIntervalsAsync(station, [previousInterval], ct);
         }
     }
 

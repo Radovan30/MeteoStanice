@@ -11,7 +11,9 @@ namespace MeteoStanice
     public sealed class NanoUploadWorker
     {
         private const int UploadRetryDelayMilliseconds = 60000;
-        private const int UploadSuccessDelayMilliseconds = 5000;
+        // Short pause after a successful upload: a fresh sample (every 10 s) is sent almost
+        // immediately and a flash backlog is drained at about 6 samples per second.
+        private const int UploadSuccessDelayMilliseconds = 1000;
         private const int IdleDelayMilliseconds = 1000;
         private const int PauseDelayMilliseconds = 100;
         private const int SchedulePollMilliseconds = 200;

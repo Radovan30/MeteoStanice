@@ -1,3 +1,4 @@
+using MeteoStanice.Contracts.Samples;
 using MeteoStanice.Data;
 using MeteoStanice.Data.Entities;
 using MeteoStanice.Monitor.Models;
@@ -77,6 +78,67 @@ public sealed class StationDataReader(string connectionString)
         }
 
         return snapshots;
+    }
+
+    /// <summary>
+    /// Nacte posledni 10s vzorek kazde aktivni stanice (klic = StationGuid). Pro kazdou stanici
+    /// jeden dotaz pres index (StationId, MeasuredAt) – tabulka SensorSamples je velka.
+    /// </summary>
+    public async Task<Dictionary<Guid, SensorSampleDto>> ReadLatestSamplesAsync(CancellationToken ct)
+    {
+        await using MeteoDbContext db = new(_options);
+        var stations = await db.Stations
+            .Where(station => station.IsActive)
+            .Select(station => new { station.Id, station.StationGuid, station.StationCode, station.Name })
+            .ToListAsync(ct);
+
+        DateTimeOffset futureLimit = DateTimeOffset.UtcNow + FutureTolerance;
+        Dictionary<Guid, SensorSampleDto> result = [];
+        foreach (var station in stations)
+        {
+            SensorSample? sample = await db.SensorSamples
+                .Where(item => item.StationId == station.Id && item.MeasuredAt <= futureLimit)
+                .OrderByDescending(item => item.MeasuredAt)
+                .FirstOrDefaultAsync(ct);
+            if (sample is null)
+            {
+                continue;
+            }
+
+            result[station.StationGuid] = new SensorSampleDto
+            {
+                Id = sample.Id,
+                StationGuid = station.StationGuid,
+                StationCode = station.StationCode,
+                StationName = station.Name,
+                SequenceNumber = sample.SequenceNumber,
+                MeasuredAt = sample.MeasuredAt,
+                CreatedAt = sample.CreatedAt,
+                TemperatureCelsius = sample.TemperatureCelsius,
+                HumidityPercent = sample.HumidityPercent,
+                PressureHpa = sample.PressureHpa,
+                Bmp280TemperatureCelsius = sample.Bmp280TemperatureCelsius,
+                Pm1 = sample.Pm1,
+                Pm25 = sample.Pm25,
+                Pm4 = sample.Pm4,
+                Pm10 = sample.Pm10,
+                NumberPm05 = sample.NumberPm05,
+                NumberPm1 = sample.NumberPm1,
+                NumberPm25 = sample.NumberPm25,
+                NumberPm4 = sample.NumberPm4,
+                NumberPm10 = sample.NumberPm10,
+                TypicalParticleSize = sample.TypicalParticleSize,
+                BatteryVoltage = sample.BatteryVoltage,
+                BatteryLow = sample.BatteryLow,
+                PowerSource = sample.PowerSource,
+                Sht40Status = sample.Sht40Status,
+                Bmp280Status = sample.Bmp280Status,
+                Sps30Status = sample.Sps30Status,
+                Status = sample.Status
+            };
+        }
+
+        return result;
     }
 
     /// <summary>

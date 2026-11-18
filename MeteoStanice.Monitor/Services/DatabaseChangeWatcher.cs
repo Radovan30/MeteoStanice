@@ -43,6 +43,11 @@ public sealed partial class DatabaseChangeWatcher : IAsyncDisposable
     public event Action? Changed;
 
     /// <summary>
+    /// Do SensorSamples pribyly nove 10s vzorky. Vola se z pracovniho vlakna.
+    /// </summary>
+    public event Action? SamplesChanged;
+
+    /// <summary>
     /// Zmena stavu: true = notifikace aktivni (spojeni + trigger), text pro uzivatele. Vola se z pracovniho vlakna.
     /// </summary>
     public event Action<bool, string>? StatusChanged;
@@ -82,7 +87,19 @@ public sealed partial class DatabaseChangeWatcher : IAsyncDisposable
 
                 bool triggerInstalled = await IsTriggerInstalledAsync(connection, ct);
 
-                connection.Notification += (_, _) => Changed?.Invoke();
+                // Payload = nazev tabulky (TG_TABLE_NAME). Nove 10s vzorky maji vlastni udalost,
+                // aby se kvuli nim nenacitala cela data (agregaty, udalosti, priznaky).
+                connection.Notification += (_, args) =>
+                {
+                    if (string.Equals(args.Payload, "SensorSamples", StringComparison.Ordinal))
+                    {
+                        SamplesChanged?.Invoke();
+                    }
+                    else
+                    {
+                        Changed?.Invoke();
+                    }
+                };
                 await using (NpgsqlCommand listen = new($"LISTEN {_channel}", connection))
                 {
                     await listen.ExecuteNonQueryAsync(ct);
@@ -92,6 +109,7 @@ public sealed partial class DatabaseChangeWatcher : IAsyncDisposable
 
                 // Po (znovu)pripojeni nacist data – behem vypadku mohla prijit zmena.
                 Changed?.Invoke();
+                SamplesChanged?.Invoke();
 
                 while (!ct.IsCancellationRequested)
                 {

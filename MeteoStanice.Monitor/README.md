@@ -52,23 +52,23 @@ Technicky se vlastníkem okna stane okno plochy (`Progman`), okno dostane styl `
 
 Poloha okna, režim widgetu a skryté stanice se ukládají do `%LOCALAPPDATA%\MeteoStanice.Monitor\ui-state.json` a obnoví se při dalším spuštění.
 
-## Živé 10s hodnoty z API
+## Živé 10s hodnoty
 
-Pokud je v `appsettings.json` vyplněno `Monitor:ApiBaseUrl` (např. `http://192.168.0.102:32778/api`), Monitor každých `LiveRefreshSeconds` (10 s) čte `GET /api/samples/latest` a **ukazatele zobrazují poslední 10s vzorek** každé stanice. Platí přitom:
+**Ukazatele zobrazují poslední 10s vzorek** každé stanice z tabulky `SensorSamples` (`Monitor:ShowLiveSamples`, výchozí `true`). Vzorky se načítají po notifikaci PostgreSQL: trigger na `SensorSamples` posílá payload `SensorSamples` a Monitor pak načte jen poslední vzorky, ne celá data. Periodické dotazování neprobíhá. Stanice posílá každý vzorek hned, takže se hodnoty mění zhruba každých 10 s. Platí přitom:
 
-- Vzorek starší než `LiveMaxAgeSeconds` (180 s) se nezobrazuje jako aktuální a ukazatele se vrátí k 10min průměru. Stanice odesílá vzorky po minutových blocích (6 vzorků), proto se hodnota mění zhruba jednou za minutu a výchozí limit je 180 s.
+- Vzorek starší než `LiveMaxAgeSeconds` (120 s) se nezobrazuje jako aktuální a ukazatele se vrátí k 10min průměru.
 - Když u vzorku senzor nehlásí `OK` (např. SPS30 `Timeout` při náběhu), zobrazí se pro jeho veličiny hodnota z 10min průměru.
 - Korekce SPS30 se uplatní i na 10s hodnoty.
 - **Stav stanice, chyby senzorů, rozsah min–max a úroveň znečištění (štítek i alarm) se dál hodnotí z posledního 10min agregátu v databázi.** Jedna krátká špička tak nespustí alarm.
-- Patička karty ukazuje čas 10s vzorku i konec posledního 10min průměru. Horní lišta ukazuje stav čtení z API. Při nedostupném API se zobrazují jen 10min průměry.
-- Prázdné `ApiBaseUrl` živé hodnoty vypne.
+- Patička karty ukazuje čas 10s vzorku i konec posledního 10min průměru. Horní lišta ukazuje čas posledního načtení vzorků.
+- Bez triggeru na `SensorSamples` (starší verze skriptu) se vzorky načítají jen se záložním obnovením. Spusťte aktuální `Database/monitor-notify.sql`.
 
 ## Obnovování dat
 
 Aplikace se databáze periodicky nedotazuje. Využívá mechanismus PostgreSQL **LISTEN/NOTIFY** přes knihovnu Npgsql (obdoba `SqlDependency` u SQL Serveru, která s PostgreSQL nefunguje):
 
 1. Jednorázově spusťte v DB `Database/monitor-notify.sql`. Skript přidá jen funkci a statement-level triggery volající `pg_notify`; data, tabulky ani EF migrace nemění. Kanál v triggeru (`meteo_monitor_changed`) musí odpovídat `NotifyChannel`.
-2. Monitor drží jedno spojení s `LISTEN meteo_monitor_changed`. Po každém INSERT/UPDATE/DELETE v tabulkách `Measurements`, `DeviceEvents`, `MeasurementQualityFlags`, `Stations` a `StationSettings` PostgreSQL pošle notifikaci a monitor data okamžitě načte. Změny těsně po sobě (měření, příznaky kvality, `LastSeenAt`) se sloučí do jednoho načtení (500 ms).
+2. Monitor drží jedno spojení s `LISTEN meteo_monitor_changed`. Po každém INSERT/UPDATE/DELETE v tabulkách `Measurements`, `DeviceEvents`, `MeasurementQualityFlags` a `StationSettings` PostgreSQL pošle notifikaci a monitor data okamžitě načte. U `Stations` jen při změně zobrazovaných sloupců (kód, název, umístění, aktivita, firmware, korekce), ne při `LastSeenAt`, který se mění s každým vzorkem. U `SensorSamples` (INSERT) se načtou jen poslední vzorky. Změny těsně po sobě (měření, příznaky kvality, `LastSeenAt`) se sloučí do jednoho načtení (500 ms).
 3. Každých `ReevaluateIntervalSeconds` (30 s) se **bez dotazu do DB** přepočítá stáří již načtených dat, protože výpadek stanice se projeví plynutím času, ne změnou v databázi.
 4. Pokud trigger chybí nebo je spojení přerušené, horní lišta to oznámí a do obnovení notifikací běží záložní načítání každých `FallbackRefreshSeconds` (60 s). Spojení se obnovuje automaticky a po obnovení se data načtou znovu.
 5. Spojení pro notifikace se každou minutu ověří (žije spojení, existuje trigger) – mrtvé spojení se obnoví, chybějící trigger zapne záložní načítání. Navíc pojistka: úplné načtení každých `SafetyRefreshMinutes` (5 min) a po kliknutí na „Potvrdit alarm“.
@@ -101,7 +101,7 @@ kde g = 9,80665 m·s⁻², R_d = 287,05 J·kg⁻¹·K⁻¹ a T je naměřená te
 
 | Zdroj | Použití |
 |---|---|
-| `GET /api/samples/latest` (API) | poslední 10s vzorek každé stanice pro ukazatele |
+| `SensorSamples` | poslední 10s vzorek každé stanice pro ukazatele (po notifikaci) |
 | `Stations` | aktivní stanice (`IsActive`), název, kód, umístění, `LastSeenAt` |
 | `StationSettings` | interval měření (výchozí 10 min) |
 | `Measurements` | poslední záznam podle `MeasuredAt` – PM, stav intervalu, počty vzorků, napájení |
