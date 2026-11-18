@@ -13,7 +13,7 @@ Podrobný technický popis (architektura, protokol, databáze, kontrola kvality,
 | `MeteoStanice.Data/` | Entity Framework Core model a migrace PostgreSQL |
 | `MeteoStanice.Contracts/` | Přenosové objekty a sdílené číselníky stavů (firmware ↔ API ↔ Monitor) |
 | `MeteoStanice.Quality/` | Pravidlová kontrola kvality desetiminutových agregátů |
-| `MeteoStanice.Monitor/` | WPF aplikace pro sledování stanic a alarmy ([README](MeteoStanice.Monitor/README.md)) |
+| `MeteoStanice.Monitor/` | WPF aplikace pro sledování stanic, alarmy a grafy průběhu 1–24 h ([README](MeteoStanice.Monitor/README.md)) |
 | `MeteoStanice.Web/` | Připravená kostra webového dashboardu (zatím bez funkcí) |
 | `MeteoStanice.Backend.sln` | Solution pro API, knihovny, Monitor a Web |
 | `docker-compose.yml` | Lokální PostgreSQL 17 + API |

@@ -41,14 +41,17 @@ flowchart LR
     SPS[SPS30\nprachové částice] --> ESP
     PWR[ADC\nnapájení a baterie] --> ESP
 
-    ESP[TTGO T-Display ESP32\n.NET nanoFramework] -->|HTTP JSON| API[ASP.NET Core API]
+    ESP[TTGO T-Display ESP32\n.NET nanoFramework] -->|HTTP JSON\n10s vzorky a události| API[ASP.NET Core API]
     ESP -->|SoftAP + HTTP port 80| SETUP[Lokální setup web\n192.168.4.1]
     API --> EF[Entity Framework Core]
     EF --> DB[(PostgreSQL)]
-    API --> QC[Pravidlová kontrola kvality]
+    API --> AGG[10min agregace\nperiodický worker]
+    AGG --> QC[Pravidlová kontrola kvality]
+    AGG --> DB
     API --> SIGNALR[SignalR hub]
-    SIGNALR --> DASH[Budoucí dashboard]
-    DB --> ANALYTICS[SPS30 korekce,\nstatistika a AI diagnostika]
+    SIGNALR -.-> DASH[MeteoStanice.Web\nkostra dashboardu]
+    DB -->|LISTEN/NOTIFY + čtení| MON[MeteoStanice.Monitor\nWPF: stav, alarmy, grafy]
+    DB -.-> ANALYTICS[Plán: SPS30 kalibrace,\nstatistika a detekce anomálií]
 ```
 
 Systém se skládá z následujících vrstev:
@@ -120,7 +123,7 @@ Obsahuje první vrstvu automatické kontroly dat založenou na explicitních pra
 
 ### 4.6 Projekt `MeteoStanice.Monitor`
 
-Funkční WPF monitor čte PostgreSQL v režimu pouze pro čtení: 10min agregáty, události, příznaky kvality a poslední 10s vzorek každé stanice. Vše se načítá po notifikaci PostgreSQL LISTEN/NOTIFY (triggery z `Database/monitor-notify.sql`, vzorky s vlastním payloadem `SensorSamples`), bez periodického dotazování. Vyhodnocuje dostupnost stanic a senzorové problémy (z 10min agregátů) a spouští zvukové alarmy. Hmotnostní koncentrace SPS30 pro zobrazení upravuje podle `Stations.Sps30CorrectionPercent`; raw databázové hodnoty nemění.
+Funkční WPF monitor čte PostgreSQL v režimu pouze pro čtení: 10min agregáty, události, příznaky kvality a poslední 10s vzorek každé stanice. Vše se načítá po notifikaci PostgreSQL LISTEN/NOTIFY (triggery z `Database/monitor-notify.sql`, vzorky s vlastním payloadem `SensorSamples`), bez periodického dotazování. Vyhodnocuje dostupnost stanic (podle stáří posledního 10s vzorku) a senzorové problémy (z 10min agregátů a posledního vzorku) a spouští zvukové alarmy. Okno grafu průběhu zobrazuje PM1, PM2,5, PM4, PM10, teplotu, vlhkost a tlak za 1 až 24 h pro libovolnou kombinaci stanic; data jsou 10s vzorky ze `SensorSamples` průměrované v SQL do nejvýše asi 360 bodů. Hmotnostní koncentrace SPS30 pro zobrazení upravuje podle `Stations.Sps30CorrectionPercent`; raw databázové hodnoty nemění.
 
 ### 4.7 Projekt `MeteoStanice.Web`
 
@@ -445,7 +448,7 @@ Intervaly jsou zarovnány podle UTC času. Při desetiminutové konfiguraci se u
 
 Pokud mají všechny stanice synchronizovaný čas, jejich vzorky spadají do stejných časových oken. Odeslání může proběhnout s různým zpožděním, ale `MeasuredAt` jednotlivých vzorků zůstává zachován.
 
-Backend používá polouzavřené intervaly `[začátek, konec)`. Vzorek přesně na koncové hranici patří do následujícího intervalu. Příchod prvního vzorku nového okna zároveň vyvolá sestavení předchozího uzavřeného agregátu.
+Backend používá polouzavřené intervaly `[začátek, konec)`. Vzorek přesně na koncové hranici patří do následujícího intervalu. Uzavřený interval sestaví periodický worker 15 s po hranici okna (kap. 14.8), ne příchod prvního vzorku nového okna.
 
 ### 11.3 Agregace
 
@@ -650,7 +653,7 @@ Po vytvoření nového agregátu nebo po jeho přepočtu kvůli nově doručený
 measurementReceived
 ```
 
-Tato část je připravena pro budoucí živý dashboard. Přepočet bez nových vzorků (duplicitní upload, periodický worker) novou SignalR zprávu nevytváří.
+Zprávu tedy vyvolá uzavření intervalu periodickým workerem (nový agregát) a pozdě doručené vzorky, které změní počet vzorků intervalu. Přepočet beze změny (duplicitní upload, opakovaný běh workeru) novou SignalR zprávu nevytváří. Tato část je připravena pro budoucí webový dashboard; Monitor SignalR nepoužívá a změny zjišťuje přes PostgreSQL LISTEN/NOTIFY.
 
 ### 14.8 Backendová agregace a souběh
 
@@ -1099,23 +1102,26 @@ sequenceDiagram
     participant DB as PostgreSQL
     participant QC as Quality service
     participant UI as SignalR klient
+    participant Mon as WPF Monitor
 
-    loop každých 10 sekund
+    loop každých 10 sekund (po NTP a náběhu SPS30)
         ESP->>Sensors: čtení SHT40, BMP280, SPS30
         Sensors-->>ESP: hodnoty nebo chyba
-        ESP->>Queue: vložení surového vzorku
-        Queue->>API: POST /api/samples
-        API->>DB: idempotentní uložení SensorSample
+        ESP->>Queue: vzorek do RAM (do flash jen při chybě uploadu)
+        Queue->>API: POST /api/samples (1 vzorek, backlog po 6)
+        API->>DB: idempotentní uložení SensorSample + SampleUploadBatch
+        DB-->>Mon: NOTIFY SensorSamples
+        API-->>Queue: HTTP 200 (stored, duplicate, rejected)
+        Queue->>Queue: odstranění potvrzených vzorků
     end
 
-    API->>API: uzavření nebo přepočet 10min okna
-    API->>DB: vložení nebo aktualizace Measurement
+    Note over API: 15 s po hranici 10min okna (worker),<br/>nebo pozdní vzorek z flash fronty
+    API->>DB: sestavení Measurement ze SensorSamples
     API->>QC: vyhodnocení pravidel
     QC-->>API: příznaky kvality
     API->>DB: vložení MeasurementQualityFlags
-    API->>UI: measurementReceived
-    API-->>Queue: HTTP 200
-    Queue->>Queue: odstranění potvrzeného záznamu
+    DB-->>Mon: NOTIFY Measurements
+    API->>UI: measurementReceived (nový nebo změněný agregát)
 ```
 
 ## 18. Časy v systému
@@ -1131,13 +1137,7 @@ sequenceDiagram
 | `LastSeenAt` | API | Čas posledního nově uloženého vzorku nebo události |
 | `UpdatedAt` | API | Čas změny vzdáleného nastavení |
 
-`LastSeenAt` lze použít pro orientační stav dostupnosti, protože v systému zatím není samostatný heartbeat:
-
-- do přibližně 20 minut: online,
-- 20 až 60 minut: zpoždění nebo varování,
-- déle než 60 minut: offline.
-
-Prahy nejsou nyní implementovány jako endpoint nebo služba; jde o doporučenou interpretační logiku pro dashboard.
+Samostatný heartbeat v systému není. Stanice při běžném provozu posílá vzorek každých 10 s, takže dostupnost se odvozuje ze stáří posledního vzorku (`SensorSamples.MeasuredAt`). WPF Monitor používá výchozí prahy: vzorek starší než 2 min = zpoždění (varování), starší než 5 min = stanice neměří. Bez 10s vzorků se použije stáří posledního 10min agregátu (2,5 intervalu, tj. 25 min) a `LastSeenAt` rozlišuje, zda stanice ještě komunikuje. API samo stav online/offline nevyhodnocuje.
 
 ## 19. Nasazení
 
@@ -1251,7 +1251,7 @@ Plná fronta vzorků zabere asi 415 kB. Volné místo souborového systému `I:`
 
 ### 21.5 Uživatelské rozhraní
 
-WPF monitor je implementovaný a čte PostgreSQL. SignalR endpoint je připravený, ale samostatný webový dashboard zatím není dokončený.
+WPF monitor je implementovaný: čte PostgreSQL přes LISTEN/NOTIFY, zobrazuje živé 10s hodnoty, stav stanic, alarmy a grafy průběhu za 1 až 24 h. Pro delší období (dny, týdny) a pro grafy do diplomové práce je určena analytická část (Python, export CSV). SignalR endpoint je připravený, ale samostatný webový dashboard zatím není dokončený.
 
 ## 22. Korekce SPS30 a plán kalibrace
 
@@ -1463,8 +1463,9 @@ reálné senzory
 -> backendová 10min agregace
 -> pravidlová kontrola kvality
 -> SignalR oznámení
+-> WPF Monitor (LISTEN/NOTIFY): živé hodnoty, stav, alarmy, grafy 1–24 h
 ```
 
 Systém umí obsluhovat více fyzických stanic a uchovává nejen výsledné průměry, ale také data potřebná pro posouzení důvěryhodnosti měření. To vytváří vhodný základ pro kalibraci, porovnání stanic, detekci driftu a budoucí AI diagnostiku.
 
-Za hotové nelze zatím považovat webový dashboard, analytickou část s detekcí anomálií a jejím vyhodnocením, pokročilé regresní kalibrační profily, dlouhodobou statistickou úlohu, AI klasifikaci poruch ani zabezpečení pro provoz mimo domácí LAN. Implementovány jsou základní procentní korekce SPS30, WPF monitor, perzistence událostí a debounced události poruch a zotavení senzorů. Změny firmwaru 0.4.0 zatím nebyly ověřeny na hardwaru (kap. 25, bod 1).
+Za hotové nelze zatím považovat webový dashboard, analytickou část s detekcí anomálií a jejím vyhodnocením, pokročilé regresní kalibrační profily, dlouhodobou statistickou úlohu, AI klasifikaci poruch ani zabezpečení pro provoz mimo domácí LAN. Implementovány jsou základní procentní korekce SPS30, WPF monitor s grafy průběhu, perzistence událostí a debounced události poruch a zotavení senzorů. Změny firmwaru 0.4.0 zatím nebyly ověřeny na hardwaru (kap. 25, bod 1).
