@@ -1,6 +1,6 @@
 # MeteoStanice.Monitor
 
-Desktopová aplikace (WPF, .NET 10), která **pouze čte** databázi PostgreSQL a zobrazuje aktuální koncentrace prachových částic ze všech aktivních stanic. Každá stanice má kompaktní kartu se dvěma řadami kulatých ukazatelů – prachové částice PM1, PM2,5, PM4 a PM10 (µg/m³; úroveň podle orientačních prahů ukazuje barevný štítek) a prostředí (teplota, relativní vlhkost, tlak přepočtený na hladinu moře) – a se stavem stanice. Chyby senzoru se zobrazují přímo u ukazatelů, které daný senzor měří (SHT40 → teplota a vlhkost, BMP280 → tlak, SPS30 → PM). Pokud stanice hlásí chybu nebo neměří, aplikace spustí zvukový alarm.
+Desktopová aplikace (WPF, .NET 10), která **pouze čte** databázi PostgreSQL a endpoint API s posledními 10s vzorky a zobrazuje aktuální koncentrace prachových částic ze všech aktivních stanic. Každá stanice má kompaktní kartu se dvěma řadami kulatých ukazatelů – prachové částice PM1, PM2,5, PM4 a PM10 (µg/m³; úroveň podle orientačních prahů ukazuje barevný štítek) a prostředí (teplota, relativní vlhkost, tlak přepočtený na hladinu moře) – a se stavem stanice. Chyby senzoru se zobrazují přímo u ukazatelů, které daný senzor měří (SHT40 → teplota a vlhkost, BMP280 → tlak, SPS30 → PM). Pokud stanice hlásí chybu nebo neměří, aplikace spustí zvukový alarm.
 
 Hmotnostní koncentrace PM se při zobrazení násobí staničním faktorem `1 + Sps30CorrectionPercent / 100`. Korekce se vztahuje na PM1, PM2,5, PM4, PM10 a jejich intervalové statistiky. Raw hodnoty v PostgreSQL se nemění; početní koncentrace a typická velikost částic se nekorigují.
 
@@ -52,6 +52,17 @@ Technicky se vlastníkem okna stane okno plochy (`Progman`), okno dostane styl `
 
 Poloha okna, režim widgetu a skryté stanice se ukládají do `%LOCALAPPDATA%\MeteoStanice.Monitor\ui-state.json` a obnoví se při dalším spuštění.
 
+## Živé 10s hodnoty z API
+
+Pokud je v `appsettings.json` vyplněno `Monitor:ApiBaseUrl` (např. `http://192.168.0.102:32778/api`), Monitor každých `LiveRefreshSeconds` (10 s) čte `GET /api/samples/latest` a **ukazatele zobrazují poslední 10s vzorek** každé stanice. Platí přitom:
+
+- Vzorek starší než `LiveMaxAgeSeconds` (180 s) se nezobrazuje jako aktuální a ukazatele se vrátí k 10min průměru. Stanice odesílá vzorky po minutových blocích (6 vzorků), proto se hodnota mění zhruba jednou za minutu a výchozí limit je 180 s.
+- Když u vzorku senzor nehlásí `OK` (např. SPS30 `Timeout` při náběhu), zobrazí se pro jeho veličiny hodnota z 10min průměru.
+- Korekce SPS30 se uplatní i na 10s hodnoty.
+- **Stav stanice, chyby senzorů, rozsah min–max a úroveň znečištění (štítek i alarm) se dál hodnotí z posledního 10min agregátu v databázi.** Jedna krátká špička tak nespustí alarm.
+- Patička karty ukazuje čas 10s vzorku i konec posledního 10min průměru. Horní lišta ukazuje stav čtení z API. Při nedostupném API se zobrazují jen 10min průměry.
+- Prázdné `ApiBaseUrl` živé hodnoty vypne.
+
 ## Obnovování dat
 
 Aplikace se databáze periodicky nedotazuje. Využívá mechanismus PostgreSQL **LISTEN/NOTIFY** přes knihovnu Npgsql (obdoba `SqlDependency` u SQL Serveru, která s PostgreSQL nefunguje):
@@ -88,8 +99,9 @@ kde g = 9,80665 m·s⁻², R_d = 287,05 J·kg⁻¹·K⁻¹ a T je naměřená te
 
 ## Zdroje dat
 
-| Tabulka | Použití |
+| Zdroj | Použití |
 |---|---|
+| `GET /api/samples/latest` (API) | poslední 10s vzorek každé stanice pro ukazatele |
 | `Stations` | aktivní stanice (`IsActive`), název, kód, umístění, `LastSeenAt` |
 | `StationSettings` | interval měření (výchozí 10 min) |
 | `Measurements` | poslední záznam podle `MeasuredAt` – PM, stav intervalu, počty vzorků, napájení |

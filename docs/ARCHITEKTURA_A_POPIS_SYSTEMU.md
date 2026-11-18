@@ -120,7 +120,7 @@ Obsahuje první vrstvu automatické kontroly dat založenou na explicitních pra
 
 ### 4.6 Projekt `MeteoStanice.Monitor`
 
-Funkční WPF monitor čte PostgreSQL v režimu pouze pro čtení, zobrazuje poslední data všech aktivních stanic, vyhodnocuje jejich dostupnost a senzorové problémy a spouští zvukové alarmy. Hmotnostní koncentrace SPS30 pro zobrazení upravuje podle `Stations.Sps30CorrectionPercent`; raw databázové hodnoty nemění.
+Funkční WPF monitor čte PostgreSQL v režimu pouze pro čtení (10min agregáty, události, příznaky kvality) a každých 10 s endpoint `GET /api/samples/latest`, ze kterého zobrazuje poslední 10s vzorek každé stanice. Vyhodnocuje dostupnost stanic a senzorové problémy (z 10min agregátů) a spouští zvukové alarmy. Hmotnostní koncentrace SPS30 pro zobrazení upravuje podle `Stations.Sps30CorrectionPercent`; raw databázové hodnoty nemění.
 
 ### 4.7 Projekt `MeteoStanice.Web`
 
@@ -585,7 +585,7 @@ Databáze jako taková musí v PostgreSQL existovat. API automaticky vytváří 
 | GET | `/api/events/{stationGuid}/recent?take=100` | Poslední události stanice | ne |
 | POST | `/api/samples` | Dávkové uložení desetisekundových vzorků | ano, pokud je nakonfigurován |
 | GET | `/api/samples` | Stránkovaný seznam surových vzorků | ne |
-| GET | `/api/samples/latest` | Poslední vzorek každé stanice | ne |
+| GET | `/api/samples/latest` | Poslední vzorek každé aktivní stanice (živé hodnoty pro Monitor) | ne |
 | GET | `/api/samples/export.csv` | Export vzorků pro analýzu | ne |
 | GET | `/api/stations` | Seznam stanic včetně verze firmwaru a SPS30 korekce | ne |
 | PUT | `/api/stations/{stationGuid}/sps30-correction` | Nastavení procentní korekce SPS30 stanice | administrátorský klíč `X-Admin-Key` (povinný) |

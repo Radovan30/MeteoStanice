@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.Globalization;
 using System.Windows.Media;
+using MeteoStanice.Contracts.Samples;
 using MeteoStanice.Data.Entities;
 using MeteoStanice.Monitor.Models;
 using MeteoStanice.Monitor.Services;
@@ -143,12 +144,15 @@ public sealed class StationViewModel : ObservableObject
     public StationEvaluation? Evaluation { get; private set; }
 
     /// <summary>
-    /// Aktualizuje kartu z dat nactenych z DB.
+    /// Aktualizuje kartu z dat nactenych z DB a z posledniho 10s vzorku z API (pokud je cerstvy).
+    /// Ukazatele zobrazuji 10s hodnoty; stav stanice, uroven znecisteni a rozsah min–max
+    /// se hodnoti z posledniho 10min agregatu.
     /// </summary>
-    public void Update(StationSnapshot snapshot, StationEvaluation evaluation, DateTimeOffset now)
+    public void Update(StationSnapshot snapshot, StationEvaluation evaluation, DateTimeOffset now, SensorSampleDto? live = null)
     {
         Station station = snapshot.Station;
-        Measurement? measurement = snapshot.LatestMeasurement;
+        Measurement? aggregate = snapshot.LatestMeasurement;
+        Measurement? measurement = LiveMeasurementMerger.Merge(aggregate, live, station.Sps30CorrectionPercent);
         Evaluation = evaluation;
 
         SortKey = station.StationCode;
@@ -168,7 +172,7 @@ public sealed class StationViewModel : ObservableObject
 
         foreach (PollutantGaugeViewModel gauge in Gauges)
         {
-            gauge.Update(measurement, evaluation.SensorProblems);
+            gauge.Update(measurement, aggregate, evaluation.SensorProblems);
         }
 
         double altitude = _pressureReduction.AltitudeFor(station.StationCode, station.LocationText);
@@ -177,9 +181,10 @@ public sealed class StationViewModel : ObservableObject
             gauge.Update(measurement, evaluation.SensorProblems, altitude, _pressureReduction);
         }
 
-        GaugeOpacity = evaluation.IsStale ? 0.45 : 1.0;
-        StaleText = evaluation.IsStale && measurement is not null ? "Poslední známé hodnoty – nejsou aktuální." : string.Empty;
-        FooterText = BuildFooter(measurement, now);
+        bool stale = evaluation.IsStale && live is null;
+        GaugeOpacity = stale ? 0.45 : 1.0;
+        StaleText = stale && measurement is not null ? "Poslední známé hodnoty – nejsou aktuální." : string.Empty;
+        FooterText = BuildFooter(aggregate, live, measurement, now);
         Issues = evaluation.Issues
             .Select(issue => new IssueViewModel(
                 issue.Severity switch
@@ -193,17 +198,23 @@ public sealed class StationViewModel : ObservableObject
             .ToList();
     }
 
-    private static string BuildFooter(Measurement? measurement, DateTimeOffset now)
+    private static string BuildFooter(Measurement? aggregate, SensorSampleDto? live, Measurement? measurement, DateTimeOffset now)
     {
         if (measurement is null)
         {
             return "Žádné měření v databázi.";
         }
 
-        List<string> parts =
-        [
-            $"Měřeno {StationHealthEvaluator.FormatTime(measurement.MeasuredAt, now)} (před {StationHealthEvaluator.FormatAge(now - measurement.MeasuredAt)})"
-        ];
+        List<string> parts = [];
+        if (live is not null)
+        {
+            parts.Add($"10s vzorek {StationHealthEvaluator.FormatTime(live.MeasuredAt, now)} (před {StationHealthEvaluator.FormatAge(now - live.MeasuredAt)})");
+        }
+
+        if (aggregate is not null)
+        {
+            parts.Add($"10min průměr do {StationHealthEvaluator.FormatTime(aggregate.MeasuredAt, now)}");
+        }
 
         string power = (measurement.PowerSource ?? string.Empty).Trim().ToUpperInvariant() switch
         {

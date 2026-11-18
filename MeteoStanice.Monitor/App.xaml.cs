@@ -53,7 +53,24 @@ public partial class App : Application
             return;
         }
 
-        MainViewModel viewModel = new(options, new StationDataReader(options.ConnectionString), new AlarmService(options.Sound));
+        LiveSampleClient? liveClient = null;
+        if (!string.IsNullOrWhiteSpace(options.ApiBaseUrl))
+        {
+            try
+            {
+                liveClient = new LiveSampleClient(options.ApiBaseUrl);
+            }
+            catch (UriFormatException)
+            {
+                MessageBox.Show(
+                    "Monitor:ApiBaseUrl neni platna adresa, zive 10s hodnoty budou vypnuty.",
+                    "MeteoStanice Monitor",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+            }
+        }
+
+        MainViewModel viewModel = new(options, new StationDataReader(options.ConnectionString), new AlarmService(options.Sound), liveClient);
         DatabaseChangeWatcher changeWatcher = new(options.ConnectionString, options.NotifyChannel);
         var window = new MeteoStanice.Monitor.MainWindow(viewModel, options, changeWatcher);
         MainWindow = window;

@@ -196,21 +196,20 @@ public sealed class SamplesController(
         Guid? stationGuid = null,
         CancellationToken ct = default)
     {
-        IQueryable<SensorSample> samples = dbContext.SensorSamples.AsNoTracking();
+        // Iterate the (few) stations and use the (StationId, MeasuredAt) index for each one.
+        // A DISTINCT over SensorSamples would scan the whole, ever-growing table every 10 s.
+        IQueryable<Station> stations = dbContext.Stations.AsNoTracking().Where(item => item.IsActive);
         if (stationGuid.HasValue)
         {
-            samples = samples.Where(item => item.Station.StationGuid == stationGuid.Value);
+            stations = stations.Where(item => item.StationGuid == stationGuid.Value);
         }
 
-        List<Guid> stationIds = await samples
-            .Select(item => item.StationId)
-            .Distinct()
-            .ToListAsync(ct);
+        List<Guid> stationIds = await stations.Select(item => item.Id).ToListAsync(ct);
 
         List<SensorSampleDto> result = new(stationIds.Count);
         foreach (Guid stationId in stationIds)
         {
-            SensorSampleDto? latest = await Project(samples.Where(item => item.StationId == stationId))
+            SensorSampleDto? latest = await Project(dbContext.SensorSamples.AsNoTracking().Where(item => item.StationId == stationId))
                 .OrderByDescending(item => item.MeasuredAt)
                 .ThenByDescending(item => item.Id)
                 .FirstOrDefaultAsync(ct);

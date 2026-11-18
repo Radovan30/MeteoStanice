@@ -21,6 +21,7 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _soundTimer;
     private readonly DispatcherTimer _debounceTimer;
     private readonly DispatcherTimer? _safetyTimer;
+    private readonly DispatcherTimer _liveTimer;
 
     // Sirka karty (CardWidth v XAML) + okraje karty (2 x 6) a okraj mrizky (2 x 6).
     private const double CardSlotWidth = 360 + 12;
@@ -63,6 +64,10 @@ public partial class MainWindow : Window
             _safetyTimer = new DispatcherTimer { Interval = TimeSpan.FromMinutes(options.SafetyRefreshMinutes) };
             _safetyTimer.Tick += async (_, _) => await _viewModel.RefreshAsync();
         }
+
+        // Zive 10s hodnoty z GET /api/samples/latest (jen kdyz je nastaveno Monitor:ApiBaseUrl).
+        _liveTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(options.LiveRefreshSeconds) };
+        _liveTimer.Tick += async (_, _) => await _viewModel.RefreshLiveAsync();
 
         _soundTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(5) };
         _soundTimer.Tick += (_, _) => _viewModel.SoundTick();
@@ -109,6 +114,12 @@ public partial class MainWindow : Window
             AdjustWidthToStations();
 
             await _viewModel.RefreshAsync();
+            if (_viewModel.LiveEnabled)
+            {
+                await _viewModel.RefreshLiveAsync();
+                _liveTimer.Start();
+            }
+
             _reevaluateTimer.Start();
             _fallbackTimer.Start(); // zastavi se, jakmile se potvrdi LISTEN/NOTIFY
             _soundTimer.Start();
@@ -127,6 +138,7 @@ public partial class MainWindow : Window
         Closed += async (_, _) =>
         {
             _reevaluateTimer.Stop();
+            _liveTimer.Stop();
             _fallbackTimer.Stop();
             _soundTimer.Stop();
             _debounceTimer.Stop();

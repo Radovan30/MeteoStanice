@@ -108,15 +108,19 @@ public sealed class PollutantGaugeViewModel : ObservableObject
     public string ToolTipText =>
         $"{_options.Label}: stupnice 0–{Format(_options.Maximum)} {_options.Unit}\n" +
         $"zvýšená ≥ {Format(_options.WarningThreshold)}, vysoká ≥ {Format(_options.AlarmThreshold)} {_options.Unit}\n" +
-        "Prahy jsou orientační a nastavitelné v appsettings.json. Hodnota je 10min průměr\n" +
-        "z nízkonákladového senzoru bez kalibrace – nelze ji přímo srovnávat s 24h limity WHO/EU.";
+        "Prahy jsou orientační a nastavitelné v appsettings.json. Číslo ukazuje poslední 10s vzorek,\n" +
+        "úroveň (štítek a alarm) se hodnotí z 10min průměru, aby krátké špičky nespouštěly alarm.\n" +
+        "Nízkonákladový senzor bez kalibrace – nelze přímo srovnávat s 24h limity WHO/EU.";
 
     /// <summary>
     /// Aktualizuje ukazatel z mereni a problemu senzoru.
     /// </summary>
-    public void Update(Measurement? measurement, IReadOnlyList<SensorProblem> problems)
+    /// <param name="measurement">Zobrazene hodnoty (posledni 10s vzorek nebo 10min prumer).</param>
+    /// <param name="levelSource">10min agregat pro hodnoceni urovne; null = hodnoti se zobrazena hodnota.</param>
+    /// <param name="problems">Problemy senzoru.</param>
+    public void Update(Measurement? measurement, Measurement? levelSource, IReadOnlyList<SensorProblem> problems)
     {
-        SetLevel(measurement);
+        SetLevel(measurement, levelSource);
 
         // Chyba senzoru SPS30 ma prednost pred hodnocenim koncentrace: hodnota nemusi byt platna.
         (StationHealth? severity, string problemText) = SensorMap.For(problems, _options.Code);
@@ -132,7 +136,7 @@ public sealed class PollutantGaugeViewModel : ObservableObject
         }
     }
 
-    private void SetLevel(Measurement? measurement)
+    private void SetLevel(Measurement? measurement, Measurement? levelSource)
     {
         double? raw = measurement is null ? null : Read(measurement, _options.Code);
         if (raw is null || double.IsNaN(raw.Value))
@@ -146,11 +150,13 @@ public sealed class PollutantGaugeViewModel : ObservableObject
             return;
         }
 
-        double value = raw.Value;
-        Value = Math.Clamp(value, 0, _options.Maximum);
+        Value = Math.Clamp(raw.Value, 0, _options.Maximum);
         HasValue = true;
-        ValueText = Format(value);
+        ValueText = Format(raw.Value);
         Brush = LabelBrush;
+
+        // Uroven a alarm podle 10min prumeru (pokud existuje), ne podle jednoho 10s vzorku.
+        double value = (levelSource is null ? null : Read(levelSource, _options.Code)) ?? raw.Value;
 
         if (_options.AlarmThreshold > 0 && value >= _options.AlarmThreshold)
         {

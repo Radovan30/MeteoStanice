@@ -1,15 +1,17 @@
 using System.Collections.ObjectModel;
 using System.Globalization;
 using System.Windows.Media;
+using MeteoStanice.Contracts.Samples;
 using MeteoStanice.Monitor.Models;
 using MeteoStanice.Monitor.Services;
 
 namespace MeteoStanice.Monitor.ViewModels;
 
 /// <summary>
-/// Hlavni view model: periodicky cte DB, aktualizuje karty stanic a ridi alarm.
+/// Hlavni view model: cte DB (10min agregaty, udalosti, priznaky kvality) a API (posledni 10s vzorky),
+/// aktualizuje karty stanic a ridi alarm.
 /// </summary>
-public sealed class MainViewModel(MonitorOptions options, StationDataReader reader, AlarmService alarms) : ObservableObject
+public sealed class MainViewModel(MonitorOptions options, StationDataReader reader, AlarmService alarms, LiveSampleClient? liveClient) : ObservableObject
 {
     private const string DatabaseAlarmKey = "db";
     private static readonly CultureInfo Czech = CultureInfo.GetCultureInfo("cs-CZ");
@@ -33,6 +35,9 @@ public sealed class MainViewModel(MonitorOptions options, StationDataReader read
     private bool _hasNoStations;
     private bool _databaseFailed;
     private string _databaseError = string.Empty;
+    private bool _isLiveRefreshing;
+    private Dictionary<Guid, SensorSampleDto> _liveByStationGuid = [];
+    private string _liveStatusText = liveClient is null ? "živé 10s hodnoty vypnuty (Monitor:ApiBaseUrl)" : "čekám na živá data z API…";
 
     /// <summary>Karty stanic.</summary>
     public ObservableCollection<StationViewModel> Stations { get; } = [];
@@ -45,6 +50,12 @@ public sealed class MainViewModel(MonitorOptions options, StationDataReader read
 
     /// <summary>Cas posledniho obnoveni.</summary>
     public string LastRefreshText { get => _lastRefreshText; private set => SetProperty(ref _lastRefreshText, value); }
+
+    /// <summary>Stav cteni zivych 10s vzorku z API.</summary>
+    public string LiveStatusText { get => _liveStatusText; private set => SetProperty(ref _liveStatusText, value); }
+
+    /// <summary>Jsou nakonfigurovana ziva data z API.</summary>
+    public bool LiveEnabled => liveClient is not null;
 
     /// <summary>Nazev aplikace (zahlavi, titulek okna).</summary>
     public string AppTitle => options.AppTitle;
@@ -200,6 +211,43 @@ public sealed class MainViewModel(MonitorOptions options, StationDataReader read
     }
 
     /// <summary>
+    /// Nacte posledni 10s vzorek kazde stanice z API a prekresli ukazatele. Volat z UI vlakna.
+    /// Stav stanic a alarmy chyb se dal vyhodnocuji z 10min agregatu v DB.
+    /// </summary>
+    public async Task RefreshLiveAsync()
+    {
+        if (liveClient is null || _isLiveRefreshing)
+        {
+            return;
+        }
+
+        _isLiveRefreshing = true;
+        try
+        {
+            IReadOnlyList<SensorSampleDto> samples = await liveClient.ReadLatestAsync(CancellationToken.None);
+            _liveByStationGuid = samples
+                .GroupBy(sample => sample.StationGuid)
+                .ToDictionary(group => group.Key, group => group.OrderByDescending(sample => sample.MeasuredAt).First());
+            LiveStatusText = $"živá data z API {DateTime.Now.ToString("HH:mm:ss", Czech)}";
+        }
+        catch (Exception ex)
+        {
+            _liveByStationGuid = [];
+            LiveStatusText = $"API nedostupné ({ex.GetBaseException().Message}) – zobrazeny 10min průměry";
+        }
+        finally
+        {
+            _isLiveRefreshing = false;
+        }
+
+        if (!_isRefreshing && _lastSnapshots.Count > 0)
+        {
+            ApplySnapshots(_lastSnapshots, DateTimeOffset.UtcNow);
+            UpdateAlarms();
+        }
+    }
+
+    /// <summary>
     /// Znovu vyhodnoti posledni nactena data vuci aktualnimu casu – bez dotazu do DB.
     /// Vypadek stanice se projevi plynutim casu, ne zmenou v databazi.
     /// </summary>
@@ -247,7 +295,13 @@ public sealed class MainViewModel(MonitorOptions options, StationDataReader read
                 Stations.Add(card);
             }
 
-            card.Update(snapshot, StationHealthEvaluator.Evaluate(snapshot, options, now), now);
+            SensorSampleDto? live = _liveByStationGuid.GetValueOrDefault(snapshot.Station.StationGuid);
+            if (live is not null && (now - live.MeasuredAt).TotalSeconds > options.LiveMaxAgeSeconds)
+            {
+                live = null; // stary vzorek se nezobrazuje jako aktualni
+            }
+
+            card.Update(snapshot, StationHealthEvaluator.Evaluate(snapshot, options, now), now, live);
 
             if (isNew)
             {

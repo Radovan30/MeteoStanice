@@ -395,6 +395,8 @@
                         <Run Text="{Binding ConnectionText, Mode=OneWay}" />
                         <Run Text=" · " />
                         <Run Text="{Binding LastRefreshText, Mode=OneWay}" />
+                        <Run Text=" · " />
+                        <Run Text="{Binding LiveStatusText, Mode=OneWay}" />
                     </TextBlock>
                 </DockPanel>
                 <!-- Zobrazi se jen pri problemu s notifikacemi (chybi trigger, prerusene spojeni). -->
