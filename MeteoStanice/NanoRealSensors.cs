@@ -47,6 +47,7 @@ namespace MeteoStanice
         private long _sps30StartedTicks;
         private int _sps30ConsecutiveFailures;
         private int _sps30ReadsSinceStatusCheck;
+        private bool _sps30Ready;
         private bool _bmp280Initialized;
         private byte _bmp280Address;
         private byte _bmp280ChipId;
@@ -205,6 +206,8 @@ namespace MeteoStanice
                     return result;
                 }
 
+                // First valid reading after the warm-up: the SPS30 is ready.
+                _sps30Ready = true;
                 Sps30Sample sample = new Sps30Sample();
                 sample.MassPm1 = ReadSps30Float(data, 0);
                 sample.MassPm25 = ReadSps30Float(data, 1);
@@ -248,6 +251,15 @@ namespace MeteoStanice
             _sps30 = null;
             _sps30Initialized = false;
             _sps30ReadsSinceStatusCheck = 0;
+        }
+
+        /// <summary>
+        /// True after the first valid SPS30 reading following the 30 s warm-up since boot.
+        /// Stays true afterwards, later SPS30 errors are recorded in the samples.
+        /// </summary>
+        public bool IsSps30Ready
+        {
+            get { return _sps30Ready; }
         }
 
         /// <summary>

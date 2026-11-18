@@ -11,6 +11,9 @@ namespace MeteoStanice
     {
         private const int SetupButtonTransitionBlockMilliseconds = 1500;
         private const int UploadWorkerPauseWaitMilliseconds = 70000;
+        // Safety limit: if the SPS30 does not become ready (missing or broken sensor), start storing
+        // samples anyway after 12 loops (about 2 minutes) so temperature, humidity and pressure are not lost.
+        private const int Sps30StartupGateMaxLoops = 12;
         private const int EventQueueCapacity = 16;
         private const int RawSampleQueueCapacity = 60;
         private const int PersistentRawSampleQueueCapacity = 4320;
@@ -68,6 +71,8 @@ namespace MeteoStanice
             NanoSensorEventTracker sensorEventTracker = new NanoSensorEventTracker(eventService);
             int counter = 0;
             bool clockSyncReported = false;
+            bool startupGateOpen = false;
+            int startupGateLoops = 0;
             NanoUploadWorker uploadWorker = new NanoUploadWorker(eventQueue, rawSampleQueue, persistentRawSampleQueue, eventUploadService, rawSampleUploadService, uploadClient, wifiSupervisor);
 
             eventService.Report(identity.StationId, DeviceEventSeverity.Information, DeviceEventCategory.System, DeviceEventCode.DeviceStarted, "Program", "Firmware started.");
@@ -135,16 +140,33 @@ namespace MeteoStanice
                 NanoPowerState powerState = powerService.ReadAndReport(identity.StationId);
                 NanoSensorReadSet readSet = sensorReader.ReadCurrentSample();
 
+                // After boot nothing is stored or sent until the SPS30 has finished its warm-up
+                // (about 30 s, then the first valid reading), so the data start with valid PM values.
+                if (!startupGateOpen)
+                {
+                    startupGateLoops++;
+                    if (sensors.IsSps30Ready)
+                    {
+                        startupGateOpen = true;
+                        Debug.WriteLine("SPS30 je pripraven, zacina ukladani a odesilani vzorku.");
+                    }
+                    else if (startupGateLoops >= Sps30StartupGateMaxLoops)
+                    {
+                        startupGateOpen = true;
+                        Debug.WriteLine("SPS30 neni pripraven ani po " + Sps30StartupGateMaxLoops + " cyklech, vzorky se ukladaji bez nej.");
+                    }
+                }
+
                 // Without a synchronized clock the sample would carry a 1970 timestamp, collide with
                 // other unsynchronized samples and be silently dropped as a duplicate by the API.
-                bool timeValid = clockService.HasValidTime();
+                bool timeValid = clockService.HasValidTime() && startupGateOpen;
                 if (timeValid)
                 {
                     sensorEventTracker.Track(identity.StationId, readSet);
                 }
                 else if (counter % 6 == 0)
                 {
-                    Debug.WriteLine("Cas neni synchronizovan z NTP, vzorek se neuklada.");
+                    Debug.WriteLine(startupGateOpen ? "Cas neni synchronizovan z NTP, vzorek se neuklada." : "Ceka se na nabeh SPS30, vzorek se neuklada.");
                 }
 
                 NanoRawSample rawSample;
@@ -174,7 +196,7 @@ namespace MeteoStanice
 
                 displayIpAddress = realWifiConnected ? wifiHardwareDiagnostics.GetWirelessIpAddress() : "0.0.0.0";
                 clockService.TrySynchronizeIfDue(realWifiConnected);
-                display.ShowRuntime(counter, realWifiConnected, configuration.WifiSsid, displayIpAddress, realWifiConnected ? string.Empty : wifiHardwareDiagnostics.LastConnectionMessage, clockService.GetDisplayDate(), clockService.GetDisplayTime(), GetLocationDisplayText(configuration), powerState.BatteryActive, powerState.BatteryVoltage, powerState.HasBatteryVoltage, GetNextUploadTimeText(clockService), GetUploadStatusText(uploadClient, configuration), clockService.HasValidTime() ? GetQueueStatusText(rawSampleQueue, persistentRawSampleQueue) : "T--");
+                display.ShowRuntime(counter, realWifiConnected, configuration.WifiSsid, displayIpAddress, realWifiConnected ? string.Empty : wifiHardwareDiagnostics.LastConnectionMessage, clockService.GetDisplayDate(), clockService.GetDisplayTime(), GetLocationDisplayText(configuration), powerState.BatteryActive, powerState.BatteryVoltage, powerState.HasBatteryVoltage, GetNextUploadTimeText(clockService), GetUploadStatusText(uploadClient, configuration), !startupGateOpen ? "SPS" : clockService.HasValidTime() ? GetQueueStatusText(rawSampleQueue, persistentRawSampleQueue) : "T--");
 
                 counter++;
                 SleepUntilSetupPressed(buttons, GetRuntimeLoopDelayMilliseconds(configuration, loopStartedAt));

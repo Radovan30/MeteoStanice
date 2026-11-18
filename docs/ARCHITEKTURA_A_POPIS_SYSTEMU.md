@@ -211,7 +211,8 @@ Před čtením hodnot se kontroluje příznak připravenosti dat. Data SPS30 jso
 
 Další ošetření SPS30 ve firmwaru:
 
-- **Náběh po startu:** prvních 30 s po spuštění měření se hodnoty neukládají a vzorek má stav `WAIT`. Sensirion uvádí dobu ustálení 8 až 30 s podle koncentrace.
+- **Náběh po startu:** prvních 30 s po spuštění měření se hodnoty SPS30 nepoužijí a senzor hlásí `WAIT`. Sensirion uvádí dobu ustálení 8 až 30 s podle koncentrace.
+- **Startovací brána:** po startu nebo restartu stanice se nevytvářejí, neukládají ani neodesílají žádné vzorky (ani SHT40 a BMP280), dokud SPS30 nedokončí náběh a nevrátí první platné čtení. Data tak začínají až s platnými hodnotami PM. Na displeji je místo stavu fronty `SPS`. Pojistka: pokud SPS30 nenaběhne do 12 cyklů (asi 2 minut, např. chybí nebo je vadný), ukládání začne i bez něj, aby se neztratila teplota, vlhkost a tlak. Brána platí jen po startu; pozdější chyby SPS30 se zaznamenávají ve vzorcích. Události stanice se odesílají i během brány.
 - **Stavový registr:** přibližně jednou za minutu firmware čte registr stavu zařízení (příkaz `0xD206`, firmware senzoru 2.2 a novější). Bit poruchy ventilátoru vede na `FanError`, bit poruchy laseru na `LaserError`. Pokud senzor příkaz nepodporuje, kontrola se vypne.
 - **Obnova:** nezdařená inicializace se opakuje po 60 s. Po třech po sobě jdoucích chybách komunikace se zařízení znovu vytvoří a měření se znovu spustí. Senzor tak není „ztracen“ až do restartu stanice.
 
@@ -421,7 +422,7 @@ Displej převádí UTC na středoevropský čas podle pravidla EU: letní čas (
 
 ### 11.1 Vzorkování
 
-Hlavní smyčka provede jedno čtení všech senzorů každých 10 sekund. Stejný desetisekundový takt se používá pro vytvoření a odeslání surového vzorku. Vzorek se nevytváří, dokud není čas synchronizován z NTP (kap. 10). Stav napájení vzorkování neovlivňuje (kap. 5.5).
+Hlavní smyčka provede jedno čtení všech senzorů každých 10 sekund. Stejný desetisekundový takt se používá pro vytvoření a odeslání surového vzorku. Vzorek se nevytváří, dokud není čas synchronizován z NTP (kap. 10) a dokud po startu nenaběhne SPS30 (startovací brána, kap. 5.4). Stav napájení vzorkování neovlivňuje (kap. 5.5).
 
 Při desetiminutovém intervalu je očekávaný počet vzorků:
 

@@ -43,6 +43,7 @@ Tajné hodnoty (hesla, klíče) patří do `appsettings.Local.json` nebo do prom
 
 - Otevřete `MeteoStanice.slnx` ve Visual Studiu s rozšířením .NET nanoFramework; cílová deska `ESP32_GenericDisplay_REV0`.
 - První nastavení: stiskněte tlačítko na GPIO35 za běhu stanice, připojte se k Wi-Fi `MeteoStanice-TTGO-Setup` (výchozí heslo `12345678`, doporučeno změnit) a otevřete `http://192.168.4.1/`. Zadejte Wi-Fi, URL API (např. `http://192.168.0.102:32778/api`), API klíč a místo stanice.
+- Po startu stanice čeká, až naběhne SPS30 (asi 30 s, na displeji `SPS`). Teprve potom začne ukládat a odesílat vzorky. Pokud SPS30 nenaběhne do 2 minut, ukládá se bez něj.
 - Stanice ukládá vzorky až po synchronizaci času z NTP (na displeji do té doby `T--`). Bez Wi-Fi tedy nevznikají data s neplatným časem.
 - Před aktualizací firmwaru z 0.3.x na 0.4.0 nechte vyprázdnit frontu (`Q00` na displeji). Formát flash fronty se změnil a nevyprázdněná fronta se při startu založí znovu.
 
