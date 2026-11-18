@@ -394,22 +394,32 @@ namespace MeteoStanice
                 return;
             }
 
+            // The backend is authoritative for the station code: it identifies the station by its hardware ID
+            // and may assign a different code than the one stored here (placeholder, code collision with
+            // another board, or a code changed in the database). The flash is written only on a change.
             string stationCode = ReadJsonStringProperty(responseBody, "stationCode");
-            if (stationCode == null || stationCode.Length == 0 || !ShouldAcceptServerStationCode(_configuration.StationId))
+            if (stationCode == null || stationCode.Length == 0 || stationCode == _configuration.StationId)
             {
                 return;
             }
 
+            string previousCode = _configuration.StationId;
             string stationName = ReadJsonStringProperty(responseBody, "stationName");
             _configuration.StationId = stationCode;
             if (stationName != null && stationName.Length > 0)
             {
                 _configuration.StationName = stationName;
             }
-            else if (_configuration.StationName == null || _configuration.StationName.Length == 0 || ShouldAcceptServerStationCode(_configuration.StationName))
+            else if (_configuration.StationName == null
+                || _configuration.StationName.Length == 0
+                || _configuration.StationName == previousCode
+                || _configuration.StationName == "TTGO T-Display meteostanice"
+                || ShouldAcceptServerStationCode(_configuration.StationName))
             {
                 _configuration.StationName = stationCode;
             }
+
+            Debug.WriteLine("Server pridelil kod stanice " + stationCode + " (puvodne " + previousCode + ").");
 
             if (_identity != null)
             {

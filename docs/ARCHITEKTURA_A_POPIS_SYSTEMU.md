@@ -254,7 +254,7 @@ meteostanice-002
 meteostanice-003
 ```
 
-Firmware přečte `stationCode` z úspěšné odpovědi API, zapíše jej do `StationId` a uloží jej do flash. Tím se přidělený název zachová po restartu.
+Firmware přečte `stationCode` z každé úspěšné odpovědi API. Pokud se liší od uloženého `StationId`, převezme ho a uloží do flash (flash se zapisuje jen při změně). Rozhodující je vždy kód z backendu, protože backend stanici pozná podle hardwarového ID, ne podle kódu. Typický případ je kolize: druhá deska má uložený kód, který už patří jiné stanici. Backend jí přidělí nový kód a firmware ho převezme. Starší firmware převzal kód jen místo výchozího `METEO-TEST-…`, takže deska pak dál ukazovala cizí číslo. Změnu kódu stanice v databázi (`Stations.StationCode`) stanice převezme při nejbližším uploadu.
 
 V normálním provozním režimu displej používá číselnou část kódu stanice jako krátký nadpis. Například `meteostanice-001` nebo název končící číslem 1 se zobrazí jako `METEO1`. Stanice, která od backendu ještě nedostala kód (výchozí `METEO-TEST-001`), zobrazuje `NOVA`, aby se nepletla s registrovanou stanicí 1. Pokud `NOVA` zůstává i po startu, upload neprochází (adresa API, klíč, síť).
 
