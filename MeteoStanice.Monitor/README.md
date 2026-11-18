@@ -69,7 +69,7 @@ Tlačítko **📈 Graf** v horní liště (vedle „Vše“ a stanic) otevře ok
 
 - **Stanice 1 / 2 / 3:** přepínače v barvách stanic, lze zobrazit libovolnou kombinaci.
 - **Období:** 1 h, 2 h, 8 h, 12 h, 24 h.
-- **Grafy pod sebou:** PM2,5, PM10, teplota, relativní vlhkost a tlak přepočtený na hladinu moře, v každém jedna křivka za vybranou stanici.
+- **Grafy pod sebou:** PM1, PM2,5, PM4, PM10, teplota, relativní vlhkost a tlak přepočtený na hladinu moře, v každém jedna křivka za vybranou stanici.
 - **Data:** 10s vzorky ze `SensorSamples`, zprůměrované do oken tak, aby křivka měla nejvýše asi 360 bodů (1 h = surové 10s vzorky, 2 h = 20 s, 8 h = 80 s, 12 h = 2 min, 24 h = 4 min). PM jsou včetně korekce SPS30 stanice, tlak se přepočítává stejně jako na ukazateli (výška podle `PressureReduction`).
 - **Výpadek** delší než trojnásobek okna (nejméně 1 min) křivku přeruší, takže chybějící data nejsou spojená čarou.
 - **Najetí myší** ukáže čas a hodnoty všech zobrazených stanic.

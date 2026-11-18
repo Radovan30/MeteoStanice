@@ -19,7 +19,7 @@ namespace MeteoStanice.Monitor;
 public sealed record HistoryStation(Guid Id, string Number, string Title, Brush Brush);
 
 /// <summary>
-/// Okno s prubehem mereni: vyber stanic 1/2/3, rozsah 1–24 h a grafy PM2,5, PM10, teploty,
+/// Okno s prubehem mereni: vyber stanic 1/2/3, rozsah 1–24 h a grafy PM1, PM2,5, PM4, PM10, teploty,
 /// vlhkosti a tlaku (more) s jednou krivkou za kazdou vybranou stanici. Data jsou 10s vzorky
 /// ze SensorSamples zprumerovane do oken (1 h = surove vzorky). Obnovuje se po notifikaci
 /// o novych vzorcich (RequestRefresh), bez periodickeho dotazovani.
@@ -43,7 +43,9 @@ public sealed class HistoryWindow : Window
     private readonly Dictionary<Guid, ToggleButton> _stationButtons = [];
     private readonly List<Button> _rangeButtons = [];
     private readonly TextBlock _status = new() { Foreground = new SolidColorBrush(Color.FromRgb(0x5F, 0x6B, 0x7A)), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(12, 0, 0, 0) };
+    private readonly TimeSeriesChart _pm1 = new() { Title = "PM1", Unit = "µg/m³", Decimals = 1, MinimumSpan = 5, Floor = 0 };
     private readonly TimeSeriesChart _pm25 = new() { Title = "PM2,5", Unit = "µg/m³", Decimals = 1, MinimumSpan = 5, Floor = 0 };
+    private readonly TimeSeriesChart _pm4 = new() { Title = "PM4", Unit = "µg/m³", Decimals = 1, MinimumSpan = 5, Floor = 0 };
     private readonly TimeSeriesChart _pm10 = new() { Title = "PM10", Unit = "µg/m³", Decimals = 1, MinimumSpan = 5, Floor = 0 };
     private readonly TimeSeriesChart _temperature = new() { Title = "Teplota", Unit = "°C", Decimals = 1, MinimumSpan = 2 };
     private readonly TimeSeriesChart _humidity = new() { Title = "Relativní vlhkost", Unit = "%", Decimals = 0, MinimumSpan = 5 };
@@ -163,7 +165,7 @@ public sealed class HistoryWindow : Window
         UpdateButtons();
 
         StackPanel charts = new() { Margin = new Thickness(12, 0, 12, 12) };
-        foreach (TimeSeriesChart chart in new[] { _pm25, _pm10, _temperature, _humidity, _pressure })
+        foreach (TimeSeriesChart chart in new[] { _pm1, _pm25, _pm4, _pm10, _temperature, _humidity, _pressure })
         {
             chart.Height = 150;
             chart.Margin = new Thickness(0, 6, 0, 0);
@@ -227,7 +229,9 @@ public sealed class HistoryWindow : Window
 
             // Krivka se prerusi pri vypadku delsim nez 3 prumerovaci okna (min. 1 min).
             TimeSpan maxGap = TimeSpan.FromSeconds(Math.Max(60, HistoryReader.BucketSecondsFor(_range) * 3));
+            Set(_pm1, selected, result, point => point.Pm1, maxGap);
             Set(_pm25, selected, result, point => point.Pm25, maxGap);
+            Set(_pm4, selected, result, point => point.Pm4, maxGap);
             Set(_pm10, selected, result, point => point.Pm10, maxGap);
             Set(_temperature, selected, result, point => point.Temperature, maxGap);
             Set(_humidity, selected, result, point => point.Humidity, maxGap);
