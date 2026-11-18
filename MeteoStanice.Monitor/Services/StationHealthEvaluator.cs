@@ -1,4 +1,6 @@
 using System.Globalization;
+using MeteoStanice.Contracts.Samples;
+using MeteoStanice.Contracts.Statuses;
 using MeteoStanice.Data.Entities;
 using MeteoStanice.Monitor.Models;
 
@@ -20,7 +22,18 @@ public static class StationHealthEvaluator
     /// <summary>
     /// Vyhodnoti stav jedne stanice.
     /// </summary>
-    public static StationEvaluation Evaluate(StationSnapshot snapshot, MonitorOptions options, DateTimeOffset now)
+    /// <param name="snapshot">Data z DB (10min agregat, priznaky, udalosti).</param>
+    /// <param name="options">Konfigurace.</param>
+    /// <param name="now">Aktualni cas.</param>
+    /// <param name="live">Posledni 10s vzorek stanice (i starsi), null = zadny nebo vypnuto.</param>
+    /// <param name="liveDataAvailable">10s vzorky byly uspesne nacteny (pred prvnim nactenim nebo pri chybe
+    /// cteni se dostupnost hodnoti podle agregatu, aby nevznikl falesny alarm).</param>
+    /// <remarks>
+    /// Pri zapnutych 10s vzorcich se dostupnost stanice hodnoti podle stari posledniho vzorku
+    /// (stanice posila kazdy vzorek hned), 10min agregat pak slouzi pro stav intervalu a kontroly kvality.
+    /// Bez 10s vzorku se dostupnost hodnoti jako drive podle stari agregatu.
+    /// </remarks>
+    public static StationEvaluation Evaluate(StationSnapshot snapshot, MonitorOptions options, DateTimeOffset now, SensorSampleDto? live = null, bool liveDataAvailable = false)
     {
         List<StationIssue> issues = [];
         List<SensorProblem> problems = [];
@@ -29,17 +42,55 @@ public static class StationHealthEvaluator
             ? snapshot.MeasurementIntervalMinutes
             : options.DefaultMeasurementIntervalMinutes;
         TimeSpan offlineLimit = TimeSpan.FromMinutes(intervalMinutes * options.OfflineAfterIntervals);
+        bool liveMode = options.ShowLiveSamples && liveDataAvailable;
+        TimeSpan? liveAge = live is null ? null : now - live.MeasuredAt;
+        bool liveFresh = liveAge is { } freshAge && freshAge.TotalSeconds <= options.LiveMaxAgeSeconds;
         bool stale = false;
 
-        if (measurement is null)
+        if (liveMode)
+        {
+            // Dostupnost podle 10s vzorku: vypadek se pozna za minuty, ne az za 25 min.
+            if (live is null)
+            {
+                stale = measurement is null || now - measurement.MeasuredAt > offlineLimit;
+                issues.Add(new("NoData", StationHealth.Offline, measurement is null
+                    ? "Stanice zatím neodeslala žádná data."
+                    : "Stanice neposlala žádný 10s vzorek."));
+            }
+            else if (liveAge!.Value.TotalSeconds > options.LiveOfflineAfterSeconds)
+            {
+                stale = true;
+                issues.Add(new("Offline", StationHealth.Offline,
+                    $"Žádný nový 10s vzorek {FormatAge(liveAge.Value)} (poslední {FormatTime(live.MeasuredAt, now)}) – stanice neměří nebo je nedostupná."));
+            }
+            else if (!liveFresh)
+            {
+                issues.Add(new("LiveDelay", StationHealth.Warning,
+                    $"10s vzorky se zpožďují – poslední před {FormatAge(liveAge.Value)}."));
+            }
+
+            if (liveFresh && measurement is not null && now - measurement.MeasuredAt > offlineLimit)
+            {
+                // Vzorky chodi, ale agregat nevznika => problem na backendu, ne ve stanici.
+                issues.Add(new("NoAggregate", StationHealth.Warning,
+                    $"10s vzorky chodí, ale 10min průměr chybí {FormatAge(now - measurement.MeasuredAt)} – zkontrolujte API (agregace)."));
+            }
+
+            if (liveFresh)
+            {
+                EvaluateLiveSample(live!, issues, problems);
+            }
+        }
+        else if (measurement is null)
         {
             stale = true;
             issues.Add(new("NoData", StationHealth.Offline, "Stanice zatím neodeslala žádné měření."));
         }
-        else
+
+        if (measurement is not null)
         {
             TimeSpan age = now - measurement.MeasuredAt;
-            if (age > offlineLimit)
+            if (!liveMode && age > offlineLimit)
             {
                 stale = true;
                 bool communicates = snapshot.Station.LastSeenAt is { } lastSeen && now - lastSeen <= offlineLimit;
@@ -160,7 +211,7 @@ public static class StationHealthEvaluator
 
         return group switch
         {
-            // Firmware nastavi BackupPowerActive, pokud na baterii bezel i jediny vzorek; na baterii navic vypina SPS30.
+            // BackupPowerActive = alespon jeden vzorek intervalu hlasil baterii (orientacni detekce podle napeti).
             "Power" or "Battery" => status is not ("BackupPowerActive" or "Sps30DisabledOnBattery")
                 && measurement.Sps30BatterySkippedCount == 0
                 && !string.Equals(measurement.PowerSource?.Trim(), "BAT", StringComparison.OrdinalIgnoreCase),
@@ -200,7 +251,7 @@ public static class StationHealthEvaluator
                 issues.Add(new("Status", StationHealth.Error, "Chyba čtení SPS30 – koncentrace částic nejsou spolehlivé."));
                 return;
             case "BackupPowerActive":
-                issues.Add(new("Status", StationHealth.Warning, "Interval proběhl na záložní baterii."));
+                issues.Add(new("Status", StationHealth.Warning, "Stanice v intervalu hlásila napájení z baterie (orientační detekce podle napětí, hodnoty mohou být ovlivněné)."));
                 return;
             case "Sps30DisabledOnBattery":
                 issues.Add(new("Status", StationHealth.Warning, "Běh na baterii – SPS30 je vypnutý, PM se neměří."));
@@ -276,8 +327,41 @@ public static class StationHealthEvaluator
 
         if (string.Equals(measurement.PowerSource?.Trim(), "BAT", StringComparison.OrdinalIgnoreCase))
         {
-            problems.Add(new("Battery", StationHealth.Warning, "běh na baterii"));
+            problems.Add(new("Battery", StationHealth.Warning, "hlášena baterie"));
         }
+    }
+
+    /// <summary>
+    /// Stav senzoru v poslednim 10s vzorku: ukaze problem hned, ne az v dalsim 10min agregatu.
+    /// Jeden chybny vzorek je jen varovani; chybu (cervenou) urcuje agregat nebo udalost poruchy.
+    /// SPS30 Timeout = WAIT (data jeste nejsou pripravena nebo nabeh po startu).
+    /// </summary>
+    private static void EvaluateLiveSample(SensorSampleDto live, List<StationIssue> issues, List<SensorProblem> problems)
+    {
+        AddLiveSensor(live.Sht40Status, "SHT40", issues, problems);
+        AddLiveSensor(live.Bmp280Status, "BMP280", issues, problems);
+
+        string sps30 = FirmwareEnums.Normalize(live.Sps30Status, FirmwareStatusCatalog.SensorErrorNames);
+        if (sps30 == "Timeout")
+        {
+            problems.Add(new("SPS30", StationHealth.Warning, "nabíhá (WAIT)"));
+        }
+        else
+        {
+            AddLiveSensor(live.Sps30Status, "SPS30", issues, problems);
+        }
+    }
+
+    private static void AddLiveSensor(string? rawStatus, string sensor, List<StationIssue> issues, List<SensorProblem> problems)
+    {
+        string status = FirmwareEnums.Normalize(rawStatus, FirmwareStatusCatalog.SensorErrorNames);
+        if (status is "" or "OK" or "None")
+        {
+            return;
+        }
+
+        issues.Add(new($"Live:{sensor}", StationHealth.Warning, $"{sensor} v posledním 10s vzorku: {status}."));
+        problems.Add(new(sensor, StationHealth.Warning, $"10s vzorek: {status}"));
     }
 
     private static void AddSampleProblems(List<SensorProblem> problems, string sensor, bool readFailed, int okCount, int errorCount, int expectedCount)

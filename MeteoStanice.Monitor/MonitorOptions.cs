@@ -24,6 +24,12 @@ public sealed class MonitorOptions
     public int LiveMaxAgeSeconds { get; set; } = 120;
 
     /// <summary>
+    /// Bez noveho 10s vzorku po tuto dobu (sekundy) je stanice oznacena jako NEMERI (alarm).
+    /// Plati jen pri ShowLiveSamples; jinak se pouzije OfflineAfterIntervals nad 10min agregaty.
+    /// </summary>
+    public int LiveOfflineAfterSeconds { get; set; } = 300;
+
+    /// <summary>
     /// Perioda prepocitani stari dat v sekundach (bez dotazu do DB) – kvuli detekci vypadku stanice.
     /// </summary>
     public int ReevaluateIntervalSeconds { get; set; } = 30;
@@ -71,7 +77,7 @@ public sealed class MonitorOptions
     /// <summary>
     /// Jak dlouho po restartu stanice zobrazovat varovani.
     /// </summary>
-    public int RestartWarningMinutes { get; set; } = 30;
+    public int RestartWarningMinutes { get; set; } = 10;
 
     /// <summary>
     /// Nastaveni zvukoveho upozorneni.
@@ -105,6 +111,7 @@ public sealed class MonitorOptions
     {
         ReevaluateIntervalSeconds = Math.Max(5, ReevaluateIntervalSeconds);
         LiveMaxAgeSeconds = Math.Max(30, LiveMaxAgeSeconds);
+        LiveOfflineAfterSeconds = Math.Max(LiveMaxAgeSeconds, LiveOfflineAfterSeconds);
         FallbackRefreshSeconds = Math.Max(10, FallbackRefreshSeconds);
         if (string.IsNullOrWhiteSpace(NotifyChannel))
         {

@@ -38,6 +38,7 @@ public sealed class MainViewModel(MonitorOptions options, StationDataReader read
     private bool _isLiveRefreshing;
     private Dictionary<Guid, SensorSampleDto> _liveByStationGuid = [];
     private bool _livePending;
+    private bool _liveDataAvailable;
     private string _liveStatusText = options.ShowLiveSamples ? "čekám na 10s vzorky…" : "10s vzorky vypnuty (Monitor:ShowLiveSamples)";
 
     /// <summary>Karty stanic.</summary>
@@ -234,11 +235,13 @@ public sealed class MainViewModel(MonitorOptions options, StationDataReader read
         {
             using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(10));
             _liveByStationGuid = await reader.ReadLatestSamplesAsync(timeout.Token);
+            _liveDataAvailable = true;
             LiveStatusText = $"10s vzorky {DateTime.Now.ToString("HH:mm:ss", Czech)}";
         }
         catch (Exception ex)
         {
             _liveByStationGuid = [];
+            _liveDataAvailable = false;
             LiveStatusText = $"10s vzorky nelze načíst ({ex.GetBaseException().Message}) – zobrazeny 10min průměry";
         }
         finally
@@ -306,13 +309,13 @@ public sealed class MainViewModel(MonitorOptions options, StationDataReader read
                 Stations.Add(card);
             }
 
-            SensorSampleDto? live = _liveByStationGuid.GetValueOrDefault(snapshot.Station.StationGuid);
-            if (live is not null && (now - live.MeasuredAt).TotalSeconds > options.LiveMaxAgeSeconds)
-            {
-                live = null; // stary vzorek se nezobrazuje jako aktualni
-            }
+            SensorSampleDto? latestSample = _liveByStationGuid.GetValueOrDefault(snapshot.Station.StationGuid);
+            // Dostupnost se hodnoti i podle stareho vzorku; na ukazatelich se zobrazi jen cerstvy.
+            SensorSampleDto? live = latestSample is not null && (now - latestSample.MeasuredAt).TotalSeconds <= options.LiveMaxAgeSeconds
+                ? latestSample
+                : null;
 
-            card.Update(snapshot, StationHealthEvaluator.Evaluate(snapshot, options, now), now, live);
+            card.Update(snapshot, StationHealthEvaluator.Evaluate(snapshot, options, now, latestSample, _liveDataAvailable), now, live);
 
             if (isNew)
             {

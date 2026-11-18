@@ -112,9 +112,11 @@ kde g = 9,80665 m·s⁻², R_d = 287,05 J·kg⁻¹·K⁻¹ a T je naměřená te
 
 | Stav | Podmínka |
 |---|---|
-| **NEMĚŘÍ** | žádné měření nebo poslední `MeasuredAt` starší než `interval × OfflineAfterIntervals` (výchozí 10 min × 2,5 = 25 min). Rozlišuje se, zda stanice ještě komunikuje (`LastSeenAt`). |
+| **NEMĚŘÍ** | S 10s vzorky (výchozí): žádný vzorek nebo poslední vzorek starší než `LiveOfflineAfterSeconds` (5 min). Bez 10s vzorků (`ShowLiveSamples: false` nebo dokud se vzorky nepodaří načíst): žádné měření nebo poslední 10min agregát starší než `interval × OfflineAfterIntervals` (10 min × 2,5 = 25 min); rozlišuje se, zda stanice ještě komunikuje (`LastSeenAt`). |
 | **CHYBA** | stav intervalu `Sht40ReadFailed`, `Bmp280ReadFailed`, `Sps30ReadFailed`; všechny PM hodnoty chybí; aktivní poruchová událost se závažností Error/Critical |
-| **VAROVÁNÍ** | `InsufficientSamples`, hlášený běh na baterii (orientační detekce podle napětí), SPS30 vypnutý na baterii (jen starší firmware), chybná čtení SPS30, příznaky kvality, nedávný restart, čas měření v budoucnosti |
+| **VAROVÁNÍ** | `InsufficientSamples`, hlášený běh na baterii (orientační detekce podle napětí), SPS30 vypnutý na baterii (jen starší firmware), chybná čtení SPS30, příznaky kvality, restart v posledních `RestartWarningMinutes` (10 min), čas měření v budoucnosti; 10s vzorek se zpožděním přes `LiveMaxAgeSeconds` (2 min); senzor s chybou v posledním 10s vzorku (SPS30 `WAIT` při náběhu se ukáže jen u ukazatele); 10s vzorky chodí, ale 10min průměr chybí déle než 25 min (problém agregace v API) |
+
+Nová stanice nebo nová databáze: dokud nevznikne první 10min průměr (po skončení prvního celého intervalu), karta ukazuje 10s hodnoty a v patičce „první 10min průměr po HH:MM“. Nejde o chybu.
 
 Poruchová událost je aktivní, dokud nepřijde párová událost zotavení (např. `Sps30ReadFailed` → `Sps30Restored`, `WifiConnectionFailed` → `WifiConnected`), restart stanice (`DeviceStarted`/`DeviceRestarted`) **nebo novější měření, jehož celý interval začal až po události a ve kterém daná komponenta fungovala**. Napájení: bez stavu `BackupPowerActive`/`Sps30DisabledOnBattery` a bez vynechaných vzorků SPS30 kvůli baterii. SPS30/SHT40/BMP280: bez chyb čtení a ≥ 80 % platných vzorků. Wi-Fi/server: měření dorazilo na server po události. Čas: měření má věrohodný čas. Důvod: událost zotavení se může ztratit (fronta událostí ve stanici má jen 16 míst a při dlouhém výpadku sítě se nejstarší přepisují) a starší firmware (před 0.4.0) události poruch senzorů vůbec nevytvářel. Události bez páru (lokální fronta, neznámé kódy) se zobrazují `TimeLimitedEventMinutes` (60 min). Číselné hodnoty výčtů z nanoFrameworku se převádějí podle `Models/FirmwareEnums.cs` – **pořadí musí odpovídat firmwaru**.
 

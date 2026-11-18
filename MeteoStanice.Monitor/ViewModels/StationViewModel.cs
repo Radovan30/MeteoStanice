@@ -215,6 +215,12 @@ public sealed class StationViewModel : ObservableObject
         {
             parts.Add($"10min průměr do {StationHealthEvaluator.FormatTime(aggregate.MeasuredAt, now)}");
         }
+        else if (live is not null)
+        {
+            // Prvni agregat vznikne po skonceni prvniho celeho 10min okna (+15 s).
+            DateTimeOffset nextBoundary = new(now.UtcTicks - (now.UtcTicks % TimeSpan.FromMinutes(10).Ticks) + TimeSpan.FromMinutes(10).Ticks, TimeSpan.Zero);
+            parts.Add($"první 10min průměr po {StationHealthEvaluator.FormatTime(nextBoundary, now)}");
+        }
 
         string power = (measurement.PowerSource ?? string.Empty).Trim().ToUpperInvariant() switch
         {
