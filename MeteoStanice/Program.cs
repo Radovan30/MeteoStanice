@@ -47,6 +47,9 @@ namespace MeteoStanice
             display.ShowLoading("SERVICES");
 
             INanoFriendlySensors sensors = new NanoRealSensorProvider();
+            // SPS30 needs about 30 s after start before values are stable; start it now so the warm-up
+            // overlaps with Wi-Fi connection and NTP synchronization.
+            sensors.StartSps30Measurement();
             NanoSensorReader sensorReader = new NanoSensorReader(sensors);
             NanoDeviceEventQueue eventQueue = new NanoDeviceEventQueue(EventQueueCapacity);
             NanoRawSampleQueue rawSampleQueue = new NanoRawSampleQueue(RawSampleQueueCapacity);

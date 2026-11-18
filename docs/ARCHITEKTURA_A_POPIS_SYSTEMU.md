@@ -211,7 +211,8 @@ Před čtením hodnot se kontroluje příznak připravenosti dat. Data SPS30 jso
 
 Další ošetření SPS30 ve firmwaru:
 
-- **Náběh po startu:** prvních 30 s po spuštění měření se hodnoty neukládají a vzorek má stav `WAIT`. Sensirion uvádí dobu ustálení 8 až 30 s podle koncentrace.
+- **Náběh po startu:** měření SPS30 se spouští hned po startu firmwaru, ještě před připojením k Wi-Fi a synchronizací času, takže náběh probíhá souběžně s nimi. Prvních 30 s po spuštění se hodnoty SPS30 neukládají a vzorek má u SPS30 stav `WAIT`. Sensirion uvádí typickou dobu ustálení 8 až 30 s podle koncentrace. SHT40 a BMP280 měří i během náběhu, celá stanice se tedy nezastavuje.
+- **Restart samotného ESP32:** SPS30 při něm zůstává napájený a dál měří, přitom do režimu měření lze přejít jen z klidového režimu. Firmware proto před příkazem Start (`0x0010`) vždy pošle Stop (`0x0104`). Při studeném startu je Stop neškodný. Náběh 30 s pak platí po každém startu i restartu.
 - **Stavový registr:** přibližně jednou za minutu firmware čte registr stavu zařízení (příkaz `0xD206`, firmware senzoru 2.2 a novější). Bit poruchy ventilátoru vede na `FanError`, bit poruchy laseru na `LaserError`. Pokud senzor příkaz nepodporuje, kontrola se vypne.
 - **Obnova:** nezdařená inicializace se opakuje po 60 s. Po třech po sobě jdoucích chybách komunikace se zařízení znovu vytvoří a měření se znovu spustí. Senzor tak není „ztracen“ až do restartu stanice.
 
