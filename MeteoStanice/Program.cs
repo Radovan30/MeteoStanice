@@ -337,13 +337,40 @@ namespace MeteoStanice
                 return "Q--";
             }
 
-            int dropped = rawSampleQueue.DroppedCount + persistentRawSampleQueue.DroppedCount;
-            if (dropped > 0)
+            // Samples dropped from the full RAM queue since this boot are shown as D.. (red).
+            // The persistent flash drop counter is reported to the API (SampleUploadBatches) instead,
+            // so an old overflow does not hide the current queue length forever.
+            if (rawSampleQueue.DroppedCount > 0)
             {
-                return "D" + TwoDigitLimit(dropped);
+                return "D" + TwoDigitLimit(rawSampleQueue.DroppedCount);
             }
 
-            return "Q" + TwoDigitLimit(rawSampleQueue.Count + persistentRawSampleQueue.Count);
+            return CompactQueueCount(rawSampleQueue.Count + persistentRawSampleQueue.Count);
+        }
+
+        /// <summary>
+        /// Queue length in at most three characters (display field width):
+        /// Q00-Q99, then 100-999, then 1k0-9k9 (thousands and hundreds), maximum 9k9.
+        /// </summary>
+        private static string CompactQueueCount(int count)
+        {
+            if (count < 100)
+            {
+                return "Q" + TwoDigitLimit(count);
+            }
+
+            if (count < 1000)
+            {
+                return count.ToString();
+            }
+
+            int thousands = count / 1000;
+            if (thousands > 9)
+            {
+                return "9k9";
+            }
+
+            return thousands + "k" + ((count % 1000) / 100);
         }
 
         private static string TwoDigitLimit(int value)

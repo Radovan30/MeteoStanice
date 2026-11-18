@@ -502,6 +502,8 @@ Firmware používá krátký RAM staging pro surové vzorky a dvě samostatné p
 | Surové vzorky v RAM | 60 | Neúplný blok aktuálních 10sekundových vzorků |
 | Surové vzorky ve flash | 4320 | Přibližně 12 hodin při intervalu 10 sekund |
 
+Displej ukazuje počet čekajících vzorků (RAM i flash) na třech znacích: `Q00` až `Q99`, potom `100` až `999` a nad tisíc `1k0` až `9k9` (tisíce a stovky, např. `4k3` = asi 4 300 vzorků). `D..` červeně znamená vzorky zahozené z plné RAM fronty od startu. Vzorek se z flash fronty odstraní hned po potvrzení serveru (HTTP 2xx). Nahromaděnou frontu worker odesílá rychlostí asi 6 vzorků za 5 s, tedy zhruba 70 za minutu, zatímco nové vznikají rychlostí 6 za minutu. Fronta 4 320 vzorků (12 h) se tak vyprázdní asi za hodinu.
+
 Záznam vzorku ve flash má od firmwaru 0.4.0 pevnou délku 96 B (formát verze 2). Měřené hodnoty se ukládají jako 32bitová čísla s plovoucí čárkou, protože senzory vyšší přesnost nedodávají. Plná fronta tak zabere asi 415 kB. Soubor s jinou verzí formátu se při startu založí znovu. **Před nahráním nového firmwaru je proto vhodné nechat frontu vyprázdnit** (na displeji `Q00`). Kapacitu interního souborového systému je potřeba ověřit dlouhodobým testem bez sítě (kap. 25).
 
 Samostatné vlákno `NanoUploadWorker` odděluje síťové operace od hlavní měřicí smyčky. Díky tomu pomalá odpověď API ani obnova Wi-Fi nezastaví čtení senzorů.
