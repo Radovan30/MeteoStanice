@@ -240,7 +240,22 @@ namespace MeteoStanice
                 normalized = normalized.Substring(0, normalized.Length - 1);
             }
 
+            // Only the API base is configured; the firmware appends /samples and /events itself.
+            // A full endpoint entered by mistake (".../api/samples") would otherwise become ".../samples/samples".
+            normalized = TrimEndpointSuffix(normalized, "/samples");
+            normalized = TrimEndpointSuffix(normalized, "/events");
+            normalized = TrimEndpointSuffix(normalized, "/measurements");
             return normalized;
+        }
+
+        private static string TrimEndpointSuffix(string url, string suffix)
+        {
+            if (url.Length > suffix.Length && url.ToLower().Substring(url.Length - suffix.Length) == suffix)
+            {
+                return url.Substring(0, url.Length - suffix.Length);
+            }
+
+            return url;
         }
 
         private static bool EnsureRuntimeDefaults(StationConfiguration configuration)
