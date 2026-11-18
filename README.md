@@ -46,6 +46,7 @@ Tajné hodnoty (hesla, klíče) patří do `appsettings.Local.json` nebo do prom
 - Po startu stanice čeká, až naběhne SPS30 (asi 30 s, na displeji `SPS`). Teprve potom začne ukládat a odesílat vzorky. Pokud SPS30 nenaběhne do 2 minut, ukládá se bez něj.
 - Stanice ukládá vzorky až po synchronizaci času z NTP (na displeji do té doby `T--`). Bez Wi-Fi tedy nevznikají data s neplatným časem.
 - Před aktualizací firmwaru z 0.3.x na 0.4.0 nechte vyprázdnit frontu (`Q00` na displeji). Formát flash fronty se změnil a nevyprázdněná fronta se při startu založí znovu.
+- Pořadí nasazení: nejdřív API (migrace proběhne při startu), potom firmware. Firmware 0.4.0 posílá protokol 2. Starší API ho odmítne a vzorky čekají ve flash frontě, která pojme asi 12 hodin.
 
 ## Data pro analýzu
 

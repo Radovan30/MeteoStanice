@@ -157,7 +157,11 @@ namespace MeteoStanice
                 Debug.WriteLine("HTTP upload " + label + " status=" + response.StatusCode);
                 MarkUploadResult(success, response.StatusCode);
                 ConsecutiveNetworkFailures = response.StatusCode > 0 ? 0 : ConsecutiveNetworkFailures + 1;
-                LastUploadRejected = response.StatusCode == 400 || response.StatusCode == 413 || response.StatusCode == 422;
+                // HTTP 400 because of an unknown protocol version means an older API, not a bad record:
+                // keep the data and retry until the API is updated.
+                bool protocolMismatch = response.Body != null && response.Body.IndexOf("protocol") >= 0;
+                LastUploadRejected = !protocolMismatch
+                    && (response.StatusCode == 400 || response.StatusCode == 413 || response.StatusCode == 422);
                 if (success)
                 {
                     TryApplyServerStationIdentity(response.Body);

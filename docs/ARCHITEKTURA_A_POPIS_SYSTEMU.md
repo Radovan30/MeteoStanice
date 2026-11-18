@@ -519,7 +519,7 @@ Chování workeru:
 - po neúspěchu čeká 60 sekund,
 - samotný HTTP klient má navíc 30sekundový backoff,
 - záznam se z fronty odstraní po HTTP odpovědi 2xx,
-- záznam trvale odmítnutý serverem (HTTP 400, 413 nebo 422) se z fronty také odstraní, jinak by zablokoval všechny další záznamy; firmware počet odmítnutých vzorků vypisuje do ladicího výstupu,
+- záznam trvale odmítnutý serverem (HTTP 400, 413 nebo 422) se z fronty také odstraní, jinak by zablokoval všechny další záznamy; počet odmítnutých vzorků firmware posílá v `rejectedSampleCount`. Výjimkou je odmítnutí kvůli nepodporované verzi protokolu (starší API): data zůstanou ve frontě a upload se opakuje, dokud se API neaktualizuje,
 - ostatní chyby (síť, 401, 404, 409, 5xx) vedou k opakování.
 
 Endpoint `/api/samples` vrací vždy HTTP 200 se souhrnem (`storedCount`, `duplicateCount`, `rejectedCount`), endpoint událostí vrací 201 pro novou a 200 pro již uloženou událost. Hodnoty NaN a nekonečno firmware odesílá jako `null`, protože by jinak vznikl neplatný JSON a odmítnutí celé dávky.
