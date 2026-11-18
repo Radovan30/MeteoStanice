@@ -7,15 +7,15 @@ using System.Text;
 namespace MeteoStanice
 {
     /// <summary>
-    /// Uploads data to API server when available and otherwise keeps debug simulation.
+    /// Uploads raw samples and device events to the backend API over plain HTTP.
     /// </summary>
     public sealed class NanoUploadClient
     {
+        // Version 2 adds SPS30 number concentrations and station location text.
+        private const int ProtocolVersion = 2;
         private const int FailedUploadBackoffMilliseconds = 30000;
 
-        // True when simulated server accepts records.
-        public bool ServerAvailable { get; set; }
-        // True when HTTP upload is enabled after API health check.
+        // True when an API base URL is configured.
         private bool _httpEnabled;
         private bool _apiConfigured;
         // Configured API base URL.
@@ -34,14 +34,11 @@ namespace MeteoStanice
         public bool LastUploadSucceeded { get; private set; }
         // Last HTTP status code, or 0 when no HTTP response was received.
         public int LastHttpStatusCode { get; private set; }
-
-        /// <summary>
-        /// Creates an upload client with simulated server available.
-        /// </summary>
-        public NanoUploadClient()
-        {
-            ServerAvailable = true;
-        }
+        // True when the server permanently rejected the last payload (HTTP 400, 413 or 422).
+        // Such a record would fail forever, so callers remove it from the queue.
+        public bool LastUploadRejected { get; private set; }
+        // Consecutive attempts that ended without any HTTP response (socket, DNS or timeout error).
+        public int ConsecutiveNetworkFailures { get; private set; }
 
         /// <summary>
         /// Stores identity fields included in upload payloads.
@@ -78,37 +75,11 @@ namespace MeteoStanice
         }
 
         /// <summary>
-        /// Uploads one measurement record to the simulated server.
-        /// </summary>
-        public bool Upload(NanoMeasurementRecord record)
-        {
-            if (!ServerAvailable || record == null)
-            {
-                MarkUploadResult(false, 0);
-                return false;
-            }
-
-            if (_httpEnabled)
-            {
-                if (!CanAttemptHttp())
-                {
-                    MarkUploadResult(false, 0);
-                    return false;
-                }
-
-                return PostJson(BuildUrl("measurements"), SerializeMeasurement(record), "record #" + record.SequenceNumber);
-            }
-
-            MarkUploadResult(false, 0);
-            return false;
-        }
-
-        /// <summary>
         /// Uploads one device event to the simulated server.
         /// </summary>
         public bool UploadEvent(NanoDeviceEvent deviceEvent)
         {
-            if (!ServerAvailable || deviceEvent == null)
+            if (deviceEvent == null)
             {
                 MarkUploadResult(false, 0);
                 return false;
@@ -123,6 +94,32 @@ namespace MeteoStanice
                 }
 
                 return PostJson(BuildUrl("events"), SerializeEvent(deviceEvent), "event #" + deviceEvent.SequenceNumber);
+            }
+
+            MarkUploadResult(false, 0);
+            return false;
+        }
+
+        /// <summary>
+        /// Uploads one batch of current raw sensor samples.
+        /// </summary>
+        public bool UploadSamples(NanoRawSample[] samples, int count)
+        {
+            if (samples == null || count < 1)
+            {
+                MarkUploadResult(false, 0);
+                return false;
+            }
+
+            if (_httpEnabled)
+            {
+                if (!CanAttemptHttp())
+                {
+                    MarkUploadResult(false, 0);
+                    return false;
+                }
+
+                return PostJson(BuildUrl("samples"), SerializeRawSamples(samples, count), "raw samples " + count);
             }
 
             MarkUploadResult(false, 0);
@@ -153,6 +150,8 @@ namespace MeteoStanice
                 bool success = response.StatusCode >= 200 && response.StatusCode <= 299;
                 Debug.WriteLine("HTTP upload " + label + " status=" + response.StatusCode);
                 MarkUploadResult(success, response.StatusCode);
+                ConsecutiveNetworkFailures = response.StatusCode > 0 ? 0 : ConsecutiveNetworkFailures + 1;
+                LastUploadRejected = response.StatusCode == 400 || response.StatusCode == 413 || response.StatusCode == 422;
                 if (success)
                 {
                     TryApplyServerStationIdentity(response.Body);
@@ -169,6 +168,7 @@ namespace MeteoStanice
             {
                 Debug.WriteLine("HTTP upload " + label + " failed: " + exception.Message);
                 MarkUploadResult(false, 0);
+                ConsecutiveNetworkFailures++;
                 BackoffHttpAttempts();
                 return false;
             }
@@ -323,8 +323,17 @@ namespace MeteoStanice
             return parsed;
         }
 
+        /// <summary>
+        /// Clears the network failure counter after the Wi-Fi link was re-established.
+        /// </summary>
+        public void ResetNetworkFailures()
+        {
+            ConsecutiveNetworkFailures = 0;
+        }
+
         private void MarkUploadResult(bool succeeded, int httpStatusCode)
         {
+            LastUploadRejected = false;
             LastUploadAttempted = true;
             LastUploadSucceeded = succeeded;
             LastHttpStatusCode = httpStatusCode;
@@ -499,62 +508,119 @@ namespace MeteoStanice
         }
 
         /// <summary>
-        /// Serializes one measurement record to compact JSON.
+        /// Serializes a compact batch accepted by POST /api/samples.
         /// </summary>
-        private string SerializeMeasurement(NanoMeasurementRecord record)
+        private string SerializeRawSamples(NanoRawSample[] samples, int count)
         {
-            return "{"
-                + "\"stationGuid\":\"" + JsonEscape(GetStationGuid()) + "\","
-                + "\"stationId\":\"" + JsonEscape(record.StationId) + "\","
-                + "\"stationCode\":\"" + JsonEscape(record.StationId) + "\","
-                + "\"hardwareId\":\"" + JsonEscape(GetHardwareId()) + "\","
-                + "\"firmwareVersion\":\"" + JsonEscape(GetFirmwareVersion()) + "\","
-                + "\"sequenceNumber\":" + record.SequenceNumber + ","
-                + "\"measuredAt\":\"" + JsonEscape(record.SampledAt.ToString("o")) + "\","
-                + "\"sampledAt\":\"" + JsonEscape(record.SampledAt.ToString("o")) + "\","
-                + "\"temperatureCelsius\":" + record.TemperatureCelsius + ","
-                + "\"humidityPercent\":" + record.RelativeHumidityPercent + ","
-                + "\"relativeHumidityPercent\":" + record.RelativeHumidityPercent + ","
-                + "\"pressureHpa\":" + record.PressureHpa + ","
-                + "\"pm1\":" + record.Pm1 + ","
-                + "\"pm25\":" + record.Pm25 + ","
-                + "\"pm4\":" + record.Pm4 + ","
-                + "\"pm10\":" + record.Pm10 + ","
-                + "\"numberPm05\":" + record.NumberPm05 + ","
-                + "\"numberPm1\":" + record.NumberPm1 + ","
-                + "\"numberPm25\":" + record.NumberPm25 + ","
-                + "\"numberPm4\":" + record.NumberPm4 + ","
-                + "\"numberPm10\":" + record.NumberPm10 + ","
-                + "\"typicalParticleSize\":" + record.TypicalParticleSize + ","
-                + "\"validValueCount\":" + record.ValidValueCount + ","
-                + "\"failedReadCount\":" + record.FailedReadCount + ","
-                + "\"expectedSampleCount\":" + record.ExpectedSampleCount + ","
-                + "\"receivedSampleCount\":" + record.ReceivedSampleCount + ","
-                + "\"sht40OkCount\":" + record.Sht40OkCount + ","
-                + "\"sht40ErrorCount\":" + record.Sht40ErrorCount + ","
-                + "\"bmp280OkCount\":" + record.Bmp280OkCount + ","
-                + "\"bmp280ErrorCount\":" + record.Bmp280ErrorCount + ","
-                + "\"sps30OkCount\":" + record.Sps30OkCount + ","
-                + "\"sps30WaitCount\":" + record.Sps30WaitCount + ","
-                + "\"sps30ErrorCount\":" + record.Sps30ErrorCount + ","
-                + "\"sps30BatterySkippedCount\":" + record.Sps30BatterySkippedCount + ","
-                + "\"temperatureMin\":" + record.TemperatureMin + ","
-                + "\"temperatureMax\":" + record.TemperatureMax + ","
-                + "\"temperatureStdDev\":" + record.TemperatureStdDev + ","
-                + "\"humidityMin\":" + record.HumidityMin + ","
-                + "\"humidityMax\":" + record.HumidityMax + ","
-                + "\"humidityStdDev\":" + record.HumidityStdDev + ","
-                + "\"pressureMin\":" + record.PressureMin + ","
-                + "\"pressureMax\":" + record.PressureMax + ","
-                + "\"pressureStdDev\":" + record.PressureStdDev + ","
-                + "\"pm25Min\":" + record.Pm25Min + ","
-                + "\"pm25Max\":" + record.Pm25Max + ","
-                + "\"pm25StdDev\":" + record.Pm25StdDev + ","
-                + "\"pm10Min\":" + record.Pm10Min + ","
-                + "\"pm10Max\":" + record.Pm10Max + ","
-                + "\"pm10StdDev\":" + record.Pm10StdDev + ","
-                + "\"status\":\"" + record.Status.ToString() + "\""
-                + "}";
+            StringBuilder json = new StringBuilder();
+            json.Append("{");
+            json.Append("\"protocolVersion\":");
+            json.Append(ProtocolVersion);
+            json.Append(",");
+            json.Append("\"stationGuid\":\"");
+            json.Append(JsonEscape(GetStationGuid()));
+            json.Append("\",\"stationCode\":\"");
+            json.Append(JsonEscape(GetStationId()));
+            json.Append("\",\"hardwareId\":\"");
+            json.Append(JsonEscape(GetHardwareId()));
+            json.Append("\",\"firmwareVersion\":\"");
+            json.Append(JsonEscape(GetFirmwareVersion()));
+            json.Append("\",\"locationText\":\"");
+            json.Append(JsonEscape(GetLocationText()));
+            json.Append("\",\"samples\":[");
+
+            for (int index = 0; index < count; index++)
+            {
+                if (index > 0)
+                {
+                    json.Append(",");
+                }
+
+                AppendRawSample(json, samples[index]);
+            }
+
+            json.Append("]}");
+            return json.ToString();
+        }
+
+        private static void AppendRawSample(StringBuilder json, NanoRawSample sample)
+        {
+            json.Append("{\"sequenceNumber\":");
+            json.Append(sample.SequenceNumber);
+            json.Append(",\"measuredAt\":\"");
+            json.Append(sample.SampledAt.ToString("o"));
+            json.Append("\",\"temperatureCelsius\":");
+            json.Append(JsonNumber(sample.HasSht40, sample.TemperatureCelsius));
+            json.Append(",\"humidityPercent\":");
+            json.Append(JsonNumber(sample.HasSht40, sample.HumidityPercent));
+            json.Append(",\"pressureHpa\":");
+            json.Append(JsonNumber(sample.HasBmp280, sample.PressureHpa));
+            json.Append(",\"bmp280TemperatureCelsius\":");
+            json.Append(JsonNumber(sample.HasBmp280, sample.Bmp280TemperatureCelsius));
+            json.Append(",\"pm1\":");
+            json.Append(JsonNumber(sample.HasSps30, sample.Pm1));
+            json.Append(",\"pm25\":");
+            json.Append(JsonNumber(sample.HasSps30, sample.Pm25));
+            json.Append(",\"pm4\":");
+            json.Append(JsonNumber(sample.HasSps30, sample.Pm4));
+            json.Append(",\"pm10\":");
+            json.Append(JsonNumber(sample.HasSps30, sample.Pm10));
+            json.Append(",\"numberPm05\":");
+            json.Append(JsonNumber(sample.HasSps30, sample.NumberPm05));
+            json.Append(",\"numberPm1\":");
+            json.Append(JsonNumber(sample.HasSps30, sample.NumberPm1));
+            json.Append(",\"numberPm25\":");
+            json.Append(JsonNumber(sample.HasSps30, sample.NumberPm25));
+            json.Append(",\"numberPm4\":");
+            json.Append(JsonNumber(sample.HasSps30, sample.NumberPm4));
+            json.Append(",\"numberPm10\":");
+            json.Append(JsonNumber(sample.HasSps30, sample.NumberPm10));
+            json.Append(",\"typicalParticleSize\":");
+            json.Append(JsonNumber(sample.HasSps30, sample.TypicalParticleSize));
+            json.Append(",\"batteryVoltage\":");
+            json.Append(JsonNumber(sample.HasBatteryVoltage, sample.BatteryVoltage));
+            json.Append(",\"batteryLow\":");
+            json.Append(sample.BatteryLow ? "true" : "false");
+            json.Append(",\"powerSource\":\"");
+            json.Append(sample.BatteryActive ? "BAT" : "SRC");
+            json.Append("\",\"sht40Status\":\"");
+            json.Append(sample.HasSht40 ? "OK" : SensorErrorName(sample.Sht40Error));
+            json.Append("\",\"bmp280Status\":\"");
+            json.Append(sample.HasBmp280 ? "OK" : SensorErrorName(sample.Bmp280Error));
+            json.Append("\",\"sps30Status\":\"");
+            json.Append(sample.HasSps30 ? "OK" : SensorErrorName(sample.Sps30Error));
+            json.Append("\",\"status\":\"");
+            json.Append(!sample.HasSht40 || !sample.HasBmp280 || !sample.HasSps30
+                ? "DEGRADED"
+                : sample.BatteryLow ? "BATTERY_LOW" : "OK");
+            json.Append("\"}");
+        }
+
+        /// <summary>
+        /// Formats a measured value with three decimals; missing, NaN and infinite values become JSON null,
+        /// because "NaN" is not valid JSON and the API would reject the whole batch.
+        /// </summary>
+        private static string JsonNumber(bool hasValue, double value)
+        {
+            if (!hasValue || double.IsNaN(value) || double.IsInfinity(value))
+            {
+                return "null";
+            }
+
+            return value.ToString("F3");
+        }
+
+        private static string SensorErrorName(SensorErrorCode errorCode)
+        {
+            if (errorCode == SensorErrorCode.NotDetected) return "NotDetected";
+            if (errorCode == SensorErrorCode.Timeout) return "Timeout";
+            if (errorCode == SensorErrorCode.CrcFailed) return "CrcFailed";
+            if (errorCode == SensorErrorCode.InvalidResponse) return "InvalidResponse";
+            if (errorCode == SensorErrorCode.CommunicationFailed) return "CommunicationFailed";
+            if (errorCode == SensorErrorCode.FanError) return "FanError";
+            if (errorCode == SensorErrorCode.LaserError) return "LaserError";
+            if (errorCode == SensorErrorCode.DisabledOnBattery) return "DisabledOnBattery";
+            return "Unknown";
         }
 
         /// <summary>
@@ -563,7 +629,9 @@ namespace MeteoStanice
         private string SerializeEvent(NanoDeviceEvent deviceEvent)
         {
             return "{"
+                + "\"protocolVersion\":" + ProtocolVersion + ","
                 + "\"stationGuid\":\"" + JsonEscape(GetStationGuid()) + "\","
+                + "\"eventGuid\":\"" + JsonEscape(deviceEvent.EventGuid) + "\","
                 + "\"stationId\":\"" + JsonEscape(deviceEvent.StationId) + "\","
                 + "\"stationCode\":\"" + JsonEscape(deviceEvent.StationId) + "\","
                 + "\"hardwareId\":\"" + JsonEscape(GetHardwareId()) + "\","
@@ -583,6 +651,11 @@ namespace MeteoStanice
             return _identity == null || _identity.StationGuid == null ? string.Empty : _identity.StationGuid;
         }
 
+        private string GetStationId()
+        {
+            return _identity == null || _identity.StationId == null ? string.Empty : _identity.StationId;
+        }
+
         private string GetHardwareId()
         {
             return _identity == null || _identity.DeviceHardwareId == null ? string.Empty : _identity.DeviceHardwareId;
@@ -591,6 +664,11 @@ namespace MeteoStanice
         private string GetFirmwareVersion()
         {
             return _identity == null || _identity.FirmwareVersion == null ? string.Empty : _identity.FirmwareVersion;
+        }
+
+        private string GetLocationText()
+        {
+            return _configuration == null || _configuration.LocationText == null ? string.Empty : _configuration.LocationText;
         }
 
         /// <summary>
@@ -647,55 +725,4 @@ namespace MeteoStanice
         public string Body { get; set; }
     }
 
-    /// <summary>
-    /// Moves queued records to the upload client after successful acknowledgement.
-    /// </summary>
-    public sealed class NanoMeasurementUploadService
-    {
-        private readonly NanoMeasurementQueue _queue;
-        private readonly NanoUploadClient _client;
-
-        /// <summary>
-        /// Creates upload service for one measurement queue.
-        /// </summary>
-        public NanoMeasurementUploadService(NanoMeasurementQueue queue, NanoUploadClient client)
-        {
-            _queue = queue;
-            _client = client;
-        }
-
-        /// <summary>
-        /// Uploads at most one pending record.
-        /// </summary>
-        public bool TryUploadOne()
-        {
-            NanoMeasurementRecord record;
-            if (!_queue.TryPeek(out record))
-            {
-                return false;
-            }
-
-            if (!_client.Upload(record))
-            {
-                return false;
-            }
-
-            _queue.TryDequeue(out record);
-            return true;
-        }
-
-        /// <summary>
-        /// Uploads pending records until the queue is empty, an upload fails, or the limit is reached.
-        /// </summary>
-        public int TryUploadPending(int maxItems)
-        {
-            int uploaded = 0;
-            while (uploaded < maxItems && TryUploadOne())
-            {
-                uploaded++;
-            }
-
-            return uploaded;
-        }
-    }
 }

@@ -46,6 +46,9 @@ namespace MeteoStanice.Data.Migrations
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<Guid>("EventGuid")
+                        .HasColumnType("uuid");
+
                     b.Property<string>("Message")
                         .IsRequired()
                         .HasMaxLength(500)
@@ -70,8 +73,12 @@ namespace MeteoStanice.Data.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("StationId", "SequenceNumber")
+                    b.HasIndex("StationId", "EventGuid")
                         .IsUnique();
+
+                    b.HasIndex("StationId", "OccurredAt");
+
+                    b.HasIndex("StationId", "SequenceNumber");
 
                     b.ToTable("DeviceEvents");
                 });
@@ -265,7 +272,8 @@ namespace MeteoStanice.Data.Migrations
 
                     b.HasIndex("SensorChannelId");
 
-                    b.HasIndex("MeasurementId", "SensorChannelId", "QualityCheckId");
+                    b.HasIndex("MeasurementId", "SensorChannelId", "QualityCheckId")
+                        .IsUnique();
 
                     b.ToTable("MeasurementQualityFlags");
                 });
@@ -340,6 +348,109 @@ namespace MeteoStanice.Data.Migrations
                     b.ToTable("SensorChannels");
                 });
 
+            modelBuilder.Entity("MeteoStanice.Data.Entities.SensorSample", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("BatteryLow")
+                        .HasColumnType("boolean");
+
+                    b.Property<double?>("BatteryVoltage")
+                        .HasColumnType("double precision");
+
+                    b.Property<string>("Bmp280Status")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<double?>("Bmp280TemperatureCelsius")
+                        .HasColumnType("double precision");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<double?>("HumidityPercent")
+                        .HasColumnType("double precision");
+
+                    b.Property<DateTimeOffset>("MeasuredAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<double?>("NumberPm05")
+                        .HasColumnType("double precision");
+
+                    b.Property<double?>("NumberPm1")
+                        .HasColumnType("double precision");
+
+                    b.Property<double?>("NumberPm10")
+                        .HasColumnType("double precision");
+
+                    b.Property<double?>("NumberPm25")
+                        .HasColumnType("double precision");
+
+                    b.Property<double?>("NumberPm4")
+                        .HasColumnType("double precision");
+
+                    b.Property<double?>("Pm1")
+                        .HasColumnType("double precision");
+
+                    b.Property<double?>("Pm10")
+                        .HasColumnType("double precision");
+
+                    b.Property<double?>("Pm25")
+                        .HasColumnType("double precision");
+
+                    b.Property<double?>("Pm4")
+                        .HasColumnType("double precision");
+
+                    b.Property<string>("PowerSource")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<double?>("PressureHpa")
+                        .HasColumnType("double precision");
+
+                    b.Property<long>("SequenceNumber")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("Sht40Status")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<string>("Sps30Status")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<Guid>("StationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<double?>("TemperatureCelsius")
+                        .HasColumnType("double precision");
+
+                    b.Property<double?>("TypicalParticleSize")
+                        .HasColumnType("double precision");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MeasuredAt");
+
+                    b.HasIndex("StationId", "MeasuredAt");
+
+                    b.HasIndex("StationId", "SequenceNumber")
+                        .IsUnique();
+
+                    b.ToTable("SensorSamples");
+                });
+
             modelBuilder.Entity("MeteoStanice.Data.Entities.Station", b =>
                 {
                     b.Property<Guid>("Id")
@@ -375,6 +486,12 @@ namespace MeteoStanice.Data.Migrations
                         .HasMaxLength(160)
                         .HasColumnType("character varying(160)");
 
+                    b.Property<int>("ProtocolVersion")
+                        .HasColumnType("integer");
+
+                    b.Property<double>("Sps30CorrectionPercent")
+                        .HasColumnType("double precision");
+
                     b.Property<string>("StationCode")
                         .IsRequired()
                         .HasMaxLength(64)
@@ -384,6 +501,10 @@ namespace MeteoStanice.Data.Migrations
                         .HasColumnType("uuid");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("HardwareId")
+                        .IsUnique()
+                        .HasFilter("\"HardwareId\" <> ''");
 
                     b.HasIndex("StationCode")
                         .IsUnique();
@@ -477,6 +598,17 @@ namespace MeteoStanice.Data.Migrations
                     b.Navigation("SensorChannel");
                 });
 
+            modelBuilder.Entity("MeteoStanice.Data.Entities.SensorSample", b =>
+                {
+                    b.HasOne("MeteoStanice.Data.Entities.Station", "Station")
+                        .WithMany("SensorSamples")
+                        .HasForeignKey("StationId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Station");
+                });
+
             modelBuilder.Entity("MeteoStanice.Data.Entities.StationSetting", b =>
                 {
                     b.HasOne("MeteoStanice.Data.Entities.Station", "Station")
@@ -496,6 +628,8 @@ namespace MeteoStanice.Data.Migrations
             modelBuilder.Entity("MeteoStanice.Data.Entities.Station", b =>
                 {
                     b.Navigation("Measurements");
+
+                    b.Navigation("SensorSamples");
                 });
 #pragma warning restore 612, 618
         }

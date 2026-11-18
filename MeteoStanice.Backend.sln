@@ -13,7 +13,7 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MeteoStanice.Quality", "Met
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MeteoStanice.Web", "MeteoStanice.Web\MeteoStanice.Web.csproj", "{DC9B0461-8A19-47A0-893D-78658BCD1B90}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MeteoStanice.Desktop", "MeteoStanice.Desktop\MeteoStanice.Desktop.csproj", "{E90A118D-69DF-41CC-BE4A-00970FF961AA}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MeteoStanice.Monitor", "MeteoStanice.Monitor\MeteoStanice.Monitor.csproj", "{DC77A720-8B16-45C1-ABC2-84B3396C1B64}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -85,18 +85,18 @@ Global
 		{DC9B0461-8A19-47A0-893D-78658BCD1B90}.Release|x64.Build.0 = Release|Any CPU
 		{DC9B0461-8A19-47A0-893D-78658BCD1B90}.Release|x86.ActiveCfg = Release|Any CPU
 		{DC9B0461-8A19-47A0-893D-78658BCD1B90}.Release|x86.Build.0 = Release|Any CPU
-		{E90A118D-69DF-41CC-BE4A-00970FF961AA}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{E90A118D-69DF-41CC-BE4A-00970FF961AA}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{E90A118D-69DF-41CC-BE4A-00970FF961AA}.Debug|x64.ActiveCfg = Debug|Any CPU
-		{E90A118D-69DF-41CC-BE4A-00970FF961AA}.Debug|x64.Build.0 = Debug|Any CPU
-		{E90A118D-69DF-41CC-BE4A-00970FF961AA}.Debug|x86.ActiveCfg = Debug|Any CPU
-		{E90A118D-69DF-41CC-BE4A-00970FF961AA}.Debug|x86.Build.0 = Debug|Any CPU
-		{E90A118D-69DF-41CC-BE4A-00970FF961AA}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{E90A118D-69DF-41CC-BE4A-00970FF961AA}.Release|Any CPU.Build.0 = Release|Any CPU
-		{E90A118D-69DF-41CC-BE4A-00970FF961AA}.Release|x64.ActiveCfg = Release|Any CPU
-		{E90A118D-69DF-41CC-BE4A-00970FF961AA}.Release|x64.Build.0 = Release|Any CPU
-		{E90A118D-69DF-41CC-BE4A-00970FF961AA}.Release|x86.ActiveCfg = Release|Any CPU
-		{E90A118D-69DF-41CC-BE4A-00970FF961AA}.Release|x86.Build.0 = Release|Any CPU
+		{DC77A720-8B16-45C1-ABC2-84B3396C1B64}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{DC77A720-8B16-45C1-ABC2-84B3396C1B64}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{DC77A720-8B16-45C1-ABC2-84B3396C1B64}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{DC77A720-8B16-45C1-ABC2-84B3396C1B64}.Debug|x64.Build.0 = Debug|Any CPU
+		{DC77A720-8B16-45C1-ABC2-84B3396C1B64}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{DC77A720-8B16-45C1-ABC2-84B3396C1B64}.Debug|x86.Build.0 = Debug|Any CPU
+		{DC77A720-8B16-45C1-ABC2-84B3396C1B64}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{DC77A720-8B16-45C1-ABC2-84B3396C1B64}.Release|Any CPU.Build.0 = Release|Any CPU
+		{DC77A720-8B16-45C1-ABC2-84B3396C1B64}.Release|x64.ActiveCfg = Release|Any CPU
+		{DC77A720-8B16-45C1-ABC2-84B3396C1B64}.Release|x64.Build.0 = Release|Any CPU
+		{DC77A720-8B16-45C1-ABC2-84B3396C1B64}.Release|x86.ActiveCfg = Release|Any CPU
+		{DC77A720-8B16-45C1-ABC2-84B3396C1B64}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

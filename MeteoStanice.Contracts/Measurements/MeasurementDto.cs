@@ -71,6 +71,19 @@ public sealed class MeasurementDto
     public double? Pm10 { get; set; }
 
     /// <summary>
+    /// SPS30 correction configured for the station. Positive values increase the result.
+    /// </summary>
+    public double Sps30CorrectionPercent { get; set; }
+
+    public double? CorrectedPm1 { get; set; }
+
+    public double? CorrectedPm25 { get; set; }
+
+    public double? CorrectedPm4 { get; set; }
+
+    public double? CorrectedPm10 { get; set; }
+
+    /// <summary>
     /// Average number concentration for particles larger than 0.5 um.
     /// </summary>
     public double? NumberPm05 { get; set; }
@@ -99,6 +112,11 @@ public sealed class MeasurementDto
     /// Average typical particle size reported by SPS30.
     /// </summary>
     public double? TypicalParticleSize { get; set; }
+
+    /// <summary>
+    /// Mean battery voltage in V over the interval.
+    /// </summary>
+    public double? BatteryVoltage { get; set; }
 
     /// <summary>
     /// Power source reported or inferred for the measurement.
@@ -229,6 +247,11 @@ public sealed class MeasurementDto
     /// PM10 standard deviation in the interval.
     /// </summary>
     public double? Pm10StdDev { get; set; }
+
+    /// <summary>
+    /// Canonical measurement status name from FirmwareStatusCatalog.
+    /// </summary>
+    public string Status { get; set; } = string.Empty;
 
     /// <summary>
     /// Quality flag count attached to this measurement.

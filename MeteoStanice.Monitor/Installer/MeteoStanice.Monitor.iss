@@ -1,4 +1,4 @@
-; =====================================================================
+﻿; =====================================================================
 ; Instalator MeteoStanice Monitor (Inno Setup 6)
 ; ---------------------------------------------------------------------
 ; Postup: spustte build-installer.ps1 (publikuje aplikaci a zkompiluje
@@ -55,6 +55,8 @@ Name: "autostart"; Description: "Spouštět automaticky po přihlášení do Win
 Source: "{#PublishDir}\{#AppExe}"; DestDir: "{app}"; Flags: ignoreversion
 ; Konfigurace: pri aktualizaci se NEPREPISE, aby zustalo nastaveni pripojeni k DB, vysky a barev.
 Source: "{#PublishDir}\appsettings.json"; DestDir: "{app}"; Flags: onlyifdoesntexist
+; Lokalni connection string s heslem (jen pokud existuje pri buildu, neni v Gitu)
+Source: "{#PublishDir}\appsettings.Local.json"; DestDir: "{app}"; Flags: onlyifdoesntexist skipifsourcedoesntexist
 Source: "{#PublishDir}\Sounds\*"; DestDir: "{app}\Sounds"; Flags: ignoreversion recursesubdirs
 ; Pripadne dalsi soubory z publikace (nativni knihovny apod.).
 Source: "{#PublishDir}\*"; Excludes: "{#AppExe},appsettings.json,appsettings.Local.json,Sounds\*,*.pdb"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs skipifsourcedoesntexist

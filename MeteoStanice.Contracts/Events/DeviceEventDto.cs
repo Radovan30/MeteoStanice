@@ -11,6 +11,11 @@ public sealed class DeviceEventDto
     public Guid Id { get; set; }
 
     /// <summary>
+    /// Stable identity supplied by firmware and used for idempotency.
+    /// </summary>
+    public Guid EventGuid { get; set; }
+
+    /// <summary>
     /// Stable station GUID.
     /// </summary>
     public Guid StationGuid { get; set; }
@@ -26,7 +31,7 @@ public sealed class DeviceEventDto
     public string StationName { get; set; } = string.Empty;
 
     /// <summary>
-    /// Station-local event sequence.
+    /// Station-local diagnostic order.
     /// </summary>
     public int SequenceNumber { get; set; }
 

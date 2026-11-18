@@ -1,6 +1,8 @@
 using MeteoStanice.Api.Security;
 using MeteoStanice.Api.Services;
 using MeteoStanice.Contracts.Events;
+using MeteoStanice.Contracts.Protocol;
+using MeteoStanice.Contracts.Statuses;
 using MeteoStanice.Data;
 using MeteoStanice.Data.Entities;
 using Microsoft.AspNetCore.Mvc;
@@ -13,42 +15,63 @@ namespace MeteoStanice.Api.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/[controller]")]
-public sealed class EventsController(MeteoDbContext dbContext) : ControllerBase
+public sealed class EventsController(
+    MeteoDbContext dbContext,
+    StationRegistrationService registrationService) : ControllerBase
 {
     /// <summary>
-    /// Stores one device event uploaded by station firmware.
+    /// Stores one device event uploaded by station firmware (idempotent by EventGuid).
     /// </summary>
     [HttpPost]
     [StationApiKey]
     public async Task<ActionResult<DeviceEventDto>> Upload(DeviceEventUploadRequest request, CancellationToken ct)
     {
-        Station station = await GetOrCreateStation(request, ct);
-        station.LastSeenAt = DateTimeOffset.UtcNow;
-        if (dbContext.Entry(station).State == EntityState.Detached)
+        if (!FirmwareProtocol.IsSupported(request.ProtocolVersion))
         {
-            station = await SaveNewStationWithRetry(station, ct);
+            return BadRequest(new
+            {
+                message = "Unsupported protocol version.",
+                received = request.ProtocolVersion,
+                supported = FirmwareProtocol.CurrentVersion
+            });
         }
 
-        DeviceEvent? existingEvent = await dbContext.DeviceEvents
-            .SingleOrDefaultAsync(item => item.StationId == station.Id && item.SequenceNumber == request.SequenceNumber, ct);
+        string stationCode = !string.IsNullOrWhiteSpace(request.StationCode) ? request.StationCode : request.StationId;
+        Station station = await registrationService.GetOrCreateAsync(
+            new StationUploadIdentity(request.StationGuid, stationCode, request.HardwareId, request.FirmwareVersion, request.ProtocolVersion),
+            ct);
+
+        DeviceEvent? existingEvent = request.EventGuid != Guid.Empty
+            ? await dbContext.DeviceEvents.SingleOrDefaultAsync(
+                item => item.StationId == station.Id && item.EventGuid == request.EventGuid, ct)
+            : await dbContext.DeviceEvents
+                .Where(item => item.StationId == station.Id && item.SequenceNumber == request.SequenceNumber)
+                .OrderByDescending(item => item.CreatedAt)
+                .FirstOrDefaultAsync(ct);
         if (existingEvent is not null)
         {
+            await dbContext.SaveChangesAsync(ct);
             return Ok(MapEvent(existingEvent, station));
         }
 
+        DateTimeOffset receivedAt = DateTimeOffset.UtcNow;
         DeviceEvent deviceEvent = new()
         {
             Station = station,
+            EventGuid = request.EventGuid == Guid.Empty ? Guid.NewGuid() : request.EventGuid,
             SequenceNumber = request.SequenceNumber,
-            OccurredAt = request.OccurredAt == default ? DateTimeOffset.UtcNow : request.OccurredAt,
-            Severity = request.Severity,
-            Category = request.Category,
-            Code = request.Code,
-            Component = request.Component,
-            Message = request.Message,
-            CreatedAt = DateTimeOffset.UtcNow
+            // An event created before the station clock was synchronized carries a time around 1970;
+            // such a time is replaced by the receive time (documented limitation, CreatedAt keeps the receive time too).
+            OccurredAt = UploadTimeValidator.IsPlausible(request.OccurredAt, receivedAt) ? request.OccurredAt.ToUniversalTime() : receivedAt,
+            Severity = FirmwareStatusCatalog.NormalizeEventSeverity(request.Severity),
+            Category = FirmwareStatusCatalog.NormalizeEventCategory(request.Category),
+            Code = FirmwareStatusCatalog.NormalizeEventCode(request.Code),
+            Component = Truncate(request.Component, 120),
+            Message = Truncate(request.Message, 500),
+            CreatedAt = receivedAt
         };
 
+        station.LastSeenAt = receivedAt;
         dbContext.DeviceEvents.Add(deviceEvent);
         await dbContext.SaveChangesAsync(ct);
 
@@ -70,6 +93,7 @@ public sealed class EventsController(MeteoDbContext dbContext) : ControllerBase
             .Select(item => new DeviceEventDto
             {
                 Id = item.Id,
+                EventGuid = item.EventGuid,
                 StationGuid = item.Station.StationGuid,
                 StationCode = item.Station.StationCode,
                 StationName = item.Station.Name,
@@ -83,193 +107,41 @@ public sealed class EventsController(MeteoDbContext dbContext) : ControllerBase
             })
             .ToListAsync(ct);
 
+        foreach (DeviceEventDto deviceEvent in events)
+        {
+            NormalizeEvent(deviceEvent);
+        }
+
         return events;
     }
 
-    private async Task<Station> GetOrCreateStation(DeviceEventUploadRequest request, CancellationToken ct)
+    private static string Truncate(string? value, int maximumLength)
     {
-        string requestedStationCode = GetStationCode(request);
-        string hardwareId = Normalize(request.HardwareId);
-        bool generateStationCode = StationCodeAllocator.ShouldGenerate(requestedStationCode);
-        if (!string.IsNullOrWhiteSpace(hardwareId))
-        {
-            Station? stationByHardware = await dbContext.Stations.SingleOrDefaultAsync(item => item.HardwareId == hardwareId, ct);
-            if (stationByHardware is not null)
-            {
-                await UpdateStationMetadata(stationByHardware, requestedStationCode, generateStationCode, hardwareId, request.FirmwareVersion, ct);
-                return stationByHardware;
-            }
-        }
-
-        if (request.StationGuid != Guid.Empty)
-        {
-            Station? stationByGuid = await dbContext.Stations.SingleOrDefaultAsync(item => item.StationGuid == request.StationGuid, ct);
-            if (stationByGuid is not null)
-            {
-                if (IsDifferentHardware(stationByGuid, hardwareId))
-                {
-                    string collisionStationCode = generateStationCode
-                        ? await StationCodeAllocator.GetNextCodeAsync(dbContext, ct)
-                        : requestedStationCode;
-
-                    return CreateStation(request, collisionStationCode, hardwareId, Guid.NewGuid());
-                }
-
-                await UpdateStationMetadata(stationByGuid, requestedStationCode, generateStationCode, hardwareId, request.FirmwareVersion, ct);
-                return stationByGuid;
-            }
-        }
-
-        if (!generateStationCode)
-        {
-            Station? stationByCode = await dbContext.Stations.SingleOrDefaultAsync(item => item.StationCode == requestedStationCode, ct);
-            if (stationByCode is not null)
-            {
-                if (IsDifferentHardware(stationByCode, hardwareId))
-                {
-                    string collisionStationCode = await StationCodeAllocator.GetNextCodeAsync(dbContext, ct);
-                    return CreateStation(request, collisionStationCode, hardwareId, Guid.NewGuid());
-                }
-
-                await UpdateStationMetadata(stationByCode, requestedStationCode, generateStationCode, hardwareId, request.FirmwareVersion, ct);
-                return stationByCode;
-            }
-        }
-
-        string stationCode = generateStationCode
-            ? await StationCodeAllocator.GetNextCodeAsync(dbContext, ct)
-            : requestedStationCode;
-
-        return CreateStation(request, stationCode, hardwareId, request.StationGuid);
-    }
-
-    private async Task<Station> SaveNewStationWithRetry(Station station, CancellationToken ct)
-    {
-        for (int attempt = 1; attempt <= 5; attempt++)
-        {
-            try
-            {
-                dbContext.Stations.Add(station);
-                await dbContext.SaveChangesAsync(ct);
-                return station;
-            }
-            catch (DbUpdateException) when (attempt < 5)
-            {
-                dbContext.Entry(station).State = EntityState.Detached;
-
-                Station? existingStation = await FindExistingStationAfterInsertConflict(station, ct);
-                if (existingStation is not null)
-                {
-                    return existingStation;
-                }
-
-                station.Id = Guid.NewGuid();
-                station.StationGuid = Guid.NewGuid();
-                station.StationCode = await StationCodeAllocator.GetNextCodeAsync(dbContext, ct);
-                station.Name = StationCodeAllocator.CreateStationName(station.StationCode);
-            }
-        }
-
-        throw new InvalidOperationException("Station registration failed after repeated unique key conflicts.");
-    }
-
-    private async Task<Station?> FindExistingStationAfterInsertConflict(Station station, CancellationToken ct)
-    {
-        if (!string.IsNullOrWhiteSpace(station.HardwareId))
-        {
-            Station? stationByHardware = await dbContext.Stations.SingleOrDefaultAsync(item => item.HardwareId == station.HardwareId, ct);
-            if (stationByHardware is not null)
-            {
-                return stationByHardware;
-            }
-        }
-
-        if (station.StationGuid != Guid.Empty)
-        {
-            Station? stationByGuid = await dbContext.Stations.SingleOrDefaultAsync(item => item.StationGuid == station.StationGuid, ct);
-            if (stationByGuid is not null && !IsDifferentHardware(stationByGuid, station.HardwareId))
-            {
-                return stationByGuid;
-            }
-        }
-
-        return null;
-    }
-
-    private static Station CreateStation(DeviceEventUploadRequest request, string stationCode, string hardwareId, Guid stationGuid)
-        => new()
-        {
-            StationGuid = stationGuid == Guid.Empty ? Guid.NewGuid() : stationGuid,
-            StationCode = stationCode,
-            Name = stationCode,
-            HardwareId = hardwareId,
-            FirmwareVersion = Normalize(request.FirmwareVersion),
-            CreatedAt = DateTimeOffset.UtcNow,
-            LastSeenAt = DateTimeOffset.UtcNow,
-            IsActive = true
-        };
-
-    private async Task UpdateStationMetadata(Station station, string requestedStationCode, bool generateStationCode, string hardwareId, string firmwareVersion, CancellationToken ct)
-    {
-        if (string.IsNullOrWhiteSpace(station.StationCode) || StationCodeAllocator.ShouldGenerate(station.StationCode))
-        {
-            station.StationCode = generateStationCode
-                ? await StationCodeAllocator.GetNextCodeAsync(dbContext, ct)
-                : requestedStationCode;
-        }
-
-        if (StationCodeAllocator.HasGeneratedOrPlaceholderName(station))
-        {
-            station.Name = StationCodeAllocator.CreateStationName(station.StationCode);
-        }
-
-        if (!string.IsNullOrWhiteSpace(hardwareId) && string.IsNullOrWhiteSpace(station.HardwareId))
-        {
-            station.HardwareId = hardwareId;
-        }
-
-        if (!string.IsNullOrWhiteSpace(firmwareVersion))
-        {
-            station.FirmwareVersion = Normalize(firmwareVersion);
-        }
-    }
-
-    private static bool IsDifferentHardware(Station station, string hardwareId)
-        => !string.IsNullOrWhiteSpace(hardwareId)
-            && !string.IsNullOrWhiteSpace(station.HardwareId)
-            && !string.Equals(station.HardwareId, hardwareId, StringComparison.OrdinalIgnoreCase);
-
-    private static string Normalize(string? value)
-        => string.IsNullOrWhiteSpace(value) ? string.Empty : value.Trim();
-
-    private static string GetStationCode(DeviceEventUploadRequest request)
-    {
-        if (!string.IsNullOrWhiteSpace(request.StationCode))
-        {
-            return request.StationCode;
-        }
-
-        if (!string.IsNullOrWhiteSpace(request.StationId))
-        {
-            return request.StationId;
-        }
-
-        return request.StationGuid == Guid.Empty ? "METEO-UNKNOWN" : request.StationGuid.ToString();
+        string text = value ?? string.Empty;
+        return text.Length > maximumLength ? text[..maximumLength] : text;
     }
 
     private static DeviceEventDto MapEvent(DeviceEvent deviceEvent, Station station)
         => new()
         {
             Id = deviceEvent.Id,
+            EventGuid = deviceEvent.EventGuid,
             StationGuid = station.StationGuid,
             StationCode = station.StationCode,
             StationName = station.Name,
             SequenceNumber = deviceEvent.SequenceNumber,
             OccurredAt = deviceEvent.OccurredAt,
-            Severity = deviceEvent.Severity,
-            Category = deviceEvent.Category,
-            Code = deviceEvent.Code,
+            Severity = FirmwareStatusCatalog.NormalizeEventSeverity(deviceEvent.Severity),
+            Category = FirmwareStatusCatalog.NormalizeEventCategory(deviceEvent.Category),
+            Code = FirmwareStatusCatalog.NormalizeEventCode(deviceEvent.Code),
             Component = deviceEvent.Component,
             Message = deviceEvent.Message
         };
+
+    private static void NormalizeEvent(DeviceEventDto deviceEvent)
+    {
+        deviceEvent.Severity = FirmwareStatusCatalog.NormalizeEventSeverity(deviceEvent.Severity);
+        deviceEvent.Category = FirmwareStatusCatalog.NormalizeEventCategory(deviceEvent.Category);
+        deviceEvent.Code = FirmwareStatusCatalog.NormalizeEventCode(deviceEvent.Code);
+    }
 }

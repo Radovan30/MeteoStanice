@@ -2,11 +2,25 @@
 
 Desktopová aplikace (WPF, .NET 10), která **pouze čte** databázi PostgreSQL a zobrazuje aktuální koncentrace prachových částic ze všech aktivních stanic. Každá stanice má kompaktní kartu se dvěma řadami kulatých ukazatelů – prachové částice PM1, PM2,5, PM4 a PM10 (µg/m³; úroveň podle orientačních prahů ukazuje barevný štítek) a prostředí (teplota, relativní vlhkost, tlak přepočtený na hladinu moře) – a se stavem stanice. Chyby senzoru se zobrazují přímo u ukazatelů, které daný senzor měří (SHT40 → teplota a vlhkost, BMP280 → tlak, SPS30 → PM). Pokud stanice hlásí chybu nebo neměří, aplikace spustí zvukový alarm.
 
+Hmotnostní koncentrace PM se při zobrazení násobí staničním faktorem `1 + Sps30CorrectionPercent / 100`. Korekce se vztahuje na PM1, PM2,5, PM4, PM10 a jejich intervalové statistiky. Raw hodnoty v PostgreSQL se nemění; početní koncentrace a typická velikost částic se nekorigují.
+
 ## Spuštění
 
-1. Nastavte `ConnectionStrings:MeteoDatabase` v `appsettings.json` (nebo v `appsettings.Local.json`, případně v proměnné prostředí `ConnectionStrings__MeteoDatabase`).
+1. Vytvořte vedle `appsettings.json` soubor `appsettings.Local.json` s connection stringem (soubor je v `.gitignore`, heslo se tak nedostane do Gitu):
+
+   ```json
+   {
+     "ConnectionStrings": {
+       "MeteoDatabase": "Host=<DB_HOST>;Port=<DB_PORT>;Database=meteostanice;Username=<USER>;Password=<PASSWORD>"
+     }
+   }
+   ```
+
+   Alternativně lze použít proměnnou prostředí `ConnectionStrings__MeteoDatabase`. Verzovaný `appsettings.json` obsahuje jen zástupnou hodnotu `Password=CHANGE_ME`.
 2. Doporučení: pro monitor vytvořte v PostgreSQL samostatnou roli s právem pouze `SELECT`.
-3. Spusťte projekt `MeteoStanice.Monitor` ze solution `MeteoStanice.Backend.sln`.
+3. Spusťte projekt `MeteoStanice.Monitor` ze solution `MeteoStanice.Backend.sln` nebo samostatné `MeteoStanice.Monitor.sln`.
+
+Instalátor (`Installer/build-installer.ps1`) přibalí `appsettings.Local.json`, pokud při sestavení existuje, a při aktualizaci existující soubor nepřepíše.
 
 Aplikace nespouští migrace a nic do databáze nezapisuje. Předpokládá schéma, které vytvořilo API (`MeteoStanice.Api` aplikuje migrace při startu).
 
@@ -50,7 +64,7 @@ Aplikace se databáze periodicky nedotazuje. Využívá mechanismus PostgreSQL *
 
 ### Ošetření chybných záznamů
 
-- Firmware posílá při nulovém počtu platných vzorků hodnotu `0` místo „chybí“. Monitor proto hodnoty senzoru s `…OkCount = 0` (SPS30 → PM, SHT40 → teplota/vlhkost, BMP280 → tlak) zobrazuje jako chybějící, ne jako naměřenou nulu. Data v DB se nemění.
+- Monitor hodnoty senzoru s `…OkCount = 0` (SPS30 → PM, SHT40 → teplota/vlhkost, BMP280 → tlak) zobrazuje jako chybějící, ne jako naměřenou nulu. Data v DB se nemění.
 - Hodnoty SPS30 mimo měřicí rozsah senzoru (hmotnostní koncentrace 0–1000 µg/m³, početní 0–3000 #/cm³ dle datasheetu Sensirion) se nevyhodnocují jako „vysoká“ koncentrace, ale jako **CHYBA senzoru** (šedé ukazatele PM, alarm poruchy, ne alarm znečištění).
 - Za poslední měření se bere záznam s nejvyšším `MeasuredAt`, ale záznamy s časem více než 10 min v budoucnosti (chybný čas stanice) se ignorují a na kartě se zobrazí varování – jinak by takový záznam „zamrazil“ kartu.
 
@@ -90,7 +104,7 @@ kde g = 9,80665 m·s⁻², R_d = 287,05 J·kg⁻¹·K⁻¹ a T je naměřená te
 | **CHYBA** | stav intervalu `Sht40ReadFailed`, `Bmp280ReadFailed`, `Sps30ReadFailed`; všechny PM hodnoty chybí; aktivní poruchová událost se závažností Error/Critical |
 | **VAROVÁNÍ** | `InsufficientSamples`, běh na baterii, SPS30 vypnutý na baterii, chybná čtení SPS30, příznaky kvality, nedávný restart, čas měření v budoucnosti |
 
-Poruchová událost je aktivní, dokud nepřijde párová událost zotavení (např. `Sps30ReadFailed` → `Sps30Restored`, `WifiConnectionFailed` → `WifiConnected`), restart stanice (`DeviceStarted`/`DeviceRestarted`) **nebo novější měření, jehož celý interval začal až po události a ve kterém daná komponenta fungovala**. Napájení: bez stavu `BackupPowerActive`/`Sps30DisabledOnBattery` a bez vynechaných vzorků SPS30 kvůli baterii. SPS30/SHT40/BMP280: bez chyb čtení a ≥ 80 % platných vzorků. Wi-Fi/server: měření dorazilo na server po události. Čas: měření má věrohodný čas. Důvod: událost zotavení se může ztratit, například když firmware po restartu čísluje události znovu od 1 a API je odmítne jako duplicitní. Události bez páru (lokální fronta, neznámé kódy) se zobrazují `TimeLimitedEventMinutes` (60 min). Číselné hodnoty výčtů z nanoFrameworku se převádějí podle `Models/FirmwareEnums.cs` – **pořadí musí odpovídat firmwaru**.
+Poruchová událost je aktivní, dokud nepřijde párová událost zotavení (např. `Sps30ReadFailed` → `Sps30Restored`, `WifiConnectionFailed` → `WifiConnected`), restart stanice (`DeviceStarted`/`DeviceRestarted`) **nebo novější měření, jehož celý interval začal až po události a ve kterém daná komponenta fungovala**. Napájení: bez stavu `BackupPowerActive`/`Sps30DisabledOnBattery` a bez vynechaných vzorků SPS30 kvůli baterii. SPS30/SHT40/BMP280: bez chyb čtení a ≥ 80 % platných vzorků. Wi-Fi/server: měření dorazilo na server po události. Čas: měření má věrohodný čas. Důvod: událost zotavení se může ztratit (fronta událostí ve stanici má jen 16 míst a při dlouhém výpadku sítě se nejstarší přepisují) a starší firmware (před 0.4.0) události poruch senzorů vůbec nevytvářel. Události bez páru (lokální fronta, neznámé kódy) se zobrazují `TimeLimitedEventMinutes` (60 min). Číselné hodnoty výčtů z nanoFrameworku se převádějí podle `Models/FirmwareEnums.cs` – **pořadí musí odpovídat firmwaru**.
 
 ## Alarm
 

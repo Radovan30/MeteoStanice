@@ -1,28 +1,110 @@
 @MeteoStanice.Api_HostAddress = http://localhost:5181
 @StationApiKey = meteo-local-key
+@AdminApiKey = meteo-admin-key
 
 GET {{MeteoStanice.Api_HostAddress}}/api
 Accept: application/json
 
 ###
 
-POST {{MeteoStanice.Api_HostAddress}}/api/measurements
+GET {{MeteoStanice.Api_HostAddress}}/api/metadata/statuses
+Accept: application/json
+
+###
+
+POST {{MeteoStanice.Api_HostAddress}}/api/samples
 Content-Type: application/json
 X-Api-Key: {{StationApiKey}}
 
 {
+  "protocolVersion": 2,
+  "stationGuid": "11111111-1111-1111-1111-111111111111",
+  "stationCode": "METEO-TEST-001",
+  "hardwareId": "TTGO-TDISPLAY-ESP32-TEST",
+  "firmwareVersion": "0.4.0",
+  "locationText": "Ostrava-Poruba",
+  "samples": [
+    {
+      "sequenceNumber": 20261117090000,
+      "measuredAt": "2026-11-17T09:00:00Z",
+      "temperatureCelsius": 12.8,
+      "humidityPercent": 67.4,
+      "pressureHpa": 991.2,
+      "bmp280TemperatureCelsius": 12.9,
+      "pm1": 4.1,
+      "pm25": 4.4,
+      "pm4": 4.4,
+      "pm10": 4.4,
+      "numberPm05": 28.1,
+      "numberPm1": 33.0,
+      "numberPm25": 33.2,
+      "numberPm4": 33.2,
+      "numberPm10": 33.2,
+      "typicalParticleSize": 0.54,
+      "batteryVoltage": 4.08,
+      "batteryLow": false,
+      "powerSource": "SRC",
+      "sht40Status": "OK",
+      "bmp280Status": "OK",
+      "sps30Status": "OK",
+      "status": "OK"
+    }
+  ]
+}
+
+###
+
+GET {{MeteoStanice.Api_HostAddress}}/api/samples?stationGuid=11111111-1111-1111-1111-111111111111&from=2026-11-17T00:00:00Z&to=2026-11-18T00:00:00Z&page=1&pageSize=200
+Accept: application/json
+
+###
+
+GET {{MeteoStanice.Api_HostAddress}}/api/samples/latest
+Accept: application/json
+
+###
+
+GET {{MeteoStanice.Api_HostAddress}}/api/samples/export.csv?stationGuid=11111111-1111-1111-1111-111111111111&from=2026-11-17T00:00:00Z&to=2026-11-18T00:00:00Z
+Accept: text/csv
+
+###
+
+GET {{MeteoStanice.Api_HostAddress}}/api/stations
+Accept: application/json
+
+###
+
+PUT {{MeteoStanice.Api_HostAddress}}/api/stations/11111111-1111-1111-1111-111111111111/sps30-correction
+Content-Type: application/json
+X-Admin-Key: {{AdminApiKey}}
+
+{
+  "correctionPercent": 5.0
+}
+
+###
+
+GET {{MeteoStanice.Api_HostAddress}}/api/measurements/11111111-1111-1111-1111-111111111111/recent?take=10
+Accept: application/json
+
+###
+
+POST {{MeteoStanice.Api_HostAddress}}/api/events
+Content-Type: application/json
+X-Api-Key: {{StationApiKey}}
+
+{
+  "protocolVersion": 2,
+  "eventGuid": "22222222-2222-2222-2222-222222222222",
   "stationGuid": "11111111-1111-1111-1111-111111111111",
   "stationCode": "METEO-TEST-001",
   "sequenceNumber": 1,
-  "measuredAt": "2026-08-19T06:00:00Z",
-  "temperatureCelsius": 22.5,
-  "humidityPercent": 48.2,
-  "pressureHpa": 1012.7,
-  "pm25": 5.1,
-  "pm10": 7.4,
-  "expectedSampleCount": 60,
-  "receivedSampleCount": 60,
-  "status": "Ok"
+  "occurredAt": "2026-11-17T10:15:00Z",
+  "severity": "Warning",
+  "category": "Sensor",
+  "code": "Sps30ReadFailed",
+  "component": "SPS30",
+  "message": "Sensor read failed."
 }
 
 ###

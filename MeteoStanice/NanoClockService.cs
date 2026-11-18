@@ -17,8 +17,10 @@ namespace MeteoStanice
         private const int SocketTimeoutMilliseconds = 4000;
         private const int SynchronizationIntervalSeconds = 21600;
         private const int RetryIntervalSeconds = 900;
+        // Until the first successful synchronization no samples are created, so retry often.
+        private const int UnsynchronizedRetryIntervalSeconds = 60;
         private const int ClockTrustSeconds = 86400;
-        private const int LocalOffsetHours = 2;
+        private const int MinimumValidYear = 2025;
         private static readonly DateTime NtpEpoch = new DateTime(1900, 1, 1, 0, 0, 0);
 
         private DateTime _lastSynchronizationUtc;
@@ -36,6 +38,24 @@ namespace MeteoStanice
             }
 
             return (DateTime.UtcNow - _lastSynchronizationUtc).TotalSeconds <= ClockTrustSeconds;
+        }
+
+        /// <summary>
+        /// Returns true once the clock was synchronized at least once since boot and shows a plausible year.
+        /// The RTC keeps running between synchronizations, so an expired trust window does not invalidate it.
+        /// Samples must not be created before this is true, otherwise they get timestamps from 1970.
+        /// </summary>
+        public bool HasValidTime()
+        {
+            return _synchronized && DateTime.UtcNow.Year >= MinimumValidYear;
+        }
+
+        /// <summary>
+        /// True after the first successful NTP synchronization since boot.
+        /// </summary>
+        public bool HasEverSynchronized
+        {
+            get { return _synchronized; }
         }
 
         /// <summary>
@@ -59,7 +79,7 @@ namespace MeteoStanice
         /// </summary>
         public string GetDisplayDate()
         {
-            DateTime localTime = DateTime.UtcNow.AddHours(LocalOffsetHours);
+            DateTime localTime = ToPragueTime(DateTime.UtcNow);
             return Two(localTime.Day) + "." + Two(localTime.Month) + "." + localTime.Year;
         }
 
@@ -76,7 +96,7 @@ namespace MeteoStanice
         /// </summary>
         public string GetDisplayTime(DateTime utcTime)
         {
-            DateTime localTime = utcTime.AddHours(LocalOffsetHours);
+            DateTime localTime = ToPragueTime(utcTime);
             return Two(localTime.Hour) + ":" + Two(localTime.Minute);
         }
 
@@ -105,7 +125,7 @@ namespace MeteoStanice
             }
             catch (Exception exception)
             {
-                _nextSynchronizationUtc = now.AddSeconds(RetryIntervalSeconds);
+                _nextSynchronizationUtc = now.AddSeconds(_synchronized ? RetryIntervalSeconds : UnsynchronizedRetryIntervalSeconds);
                 Debug.WriteLine("Clock synchronization failed: " + exception.Message);
                 return false;
             }
@@ -150,6 +170,25 @@ namespace MeteoStanice
                     socket.Close();
                 }
             }
+        }
+
+        /// <summary>
+        /// Converts UTC to Central European time (CET, UTC+1) with the EU summer time rule
+        /// (CEST, UTC+2 from the last Sunday in March 01:00 UTC to the last Sunday in October 01:00 UTC).
+        /// </summary>
+        public static DateTime ToPragueTime(DateTime utcTime)
+        {
+            DateTime summerStart = LastSundayOf(utcTime.Year, 3).AddHours(1);
+            DateTime summerEnd = LastSundayOf(utcTime.Year, 10).AddHours(1);
+            bool summerTime = utcTime.Ticks >= summerStart.Ticks && utcTime.Ticks < summerEnd.Ticks;
+            return utcTime.AddHours(summerTime ? 2 : 1);
+        }
+
+        private static DateTime LastSundayOf(int year, int month)
+        {
+            // March and October both have 31 days.
+            DateTime lastDay = new DateTime(year, month, 31, 0, 0, 0);
+            return lastDay.AddDays(-(int)lastDay.DayOfWeek);
         }
 
         private static string FormatDateTime(DateTime value)

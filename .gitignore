@@ -364,3 +364,7 @@ FodyWeavers.xsd
 # Docasne obrazky stranek z PDF (jen lokalne, neverzovat)
 tmp_pdf_pages/
 tmp_pdf_pages_contact/
+
+# Lokalni tajne hodnoty (connection stringy s heslem) - neverzovat
+appsettings.Local.json
+**/appsettings.Local.json

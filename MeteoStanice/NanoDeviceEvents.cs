@@ -1,6 +1,7 @@
 using System;
-using System.Collections;
 using System.Diagnostics;
+using System.IO;
+using System.Text;
 
 namespace MeteoStanice
 {
@@ -9,6 +10,8 @@ namespace MeteoStanice
     /// </summary>
     public sealed class NanoDeviceEvent
     {
+        // Stable identity used for idempotent upload across retries and restarts.
+        public string EventGuid { get; set; }
         // Station that produced the event.
         public string StationId { get; set; }
         // Monotonic event sequence number.
@@ -28,21 +31,33 @@ namespace MeteoStanice
     }
 
     /// <summary>
-    /// Stores device events in a fixed-size RAM queue.
+    /// Stores device events in a persistent fixed-record flash ring.
     /// </summary>
     public sealed class NanoDeviceEventQueue
     {
-        private readonly Queue _items;
+        private const string QueuePath = @"I:\meteo.events.queue";
+        private const int FileMagic = 0x4D455131;
+        private const int FileVersion = 1;
+        private const int HeaderSize = 24;
+        private const int RecordSize = 768;
+        private const int EventGuidBytes = 40;
+        private const int StationIdBytes = 64;
+        private const int ComponentBytes = 120;
+        private const int MessageBytes = 500;
+
         private readonly object _syncRoot = new object();
         private readonly int _capacity;
+        private int _head;
+        private int _count;
+        private int _droppedCount;
 
         /// <summary>
         /// Creates a device event queue with fixed capacity.
         /// </summary>
         public NanoDeviceEventQueue(int capacity)
         {
-            _items = new Queue();
             _capacity = capacity;
+            Initialize();
         }
 
         // Number of queued events.
@@ -52,7 +67,7 @@ namespace MeteoStanice
             {
                 lock (_syncRoot)
                 {
-                    return _items.Count;
+                    return _count;
                 }
             }
         }
@@ -66,20 +81,55 @@ namespace MeteoStanice
             }
         }
 
+        public int DroppedCount
+        {
+            get
+            {
+                lock (_syncRoot)
+                {
+                    return _droppedCount;
+                }
+            }
+        }
+
         /// <summary>
-        /// Adds one event when there is free capacity.
+        /// Adds one event and overwrites the oldest item when the ring is full.
         /// </summary>
         public bool Enqueue(NanoDeviceEvent deviceEvent)
         {
             lock (_syncRoot)
             {
-                if (deviceEvent == null || _items.Count >= _capacity)
+                if (deviceEvent == null)
                 {
                     return false;
                 }
 
-                _items.Enqueue(deviceEvent);
-                return true;
+                try
+                {
+                    using (FileStream stream = new FileStream(QueuePath, FileMode.OpenOrCreate, FileAccess.ReadWrite))
+                    {
+                        if (_count >= _capacity)
+                        {
+                            _head = (_head + 1) % _capacity;
+                            _count--;
+                            _droppedCount++;
+                        }
+
+                        int tail = (_head + _count) % _capacity;
+                        stream.Seek(HeaderSize + (tail * RecordSize), SeekOrigin.Begin);
+                        byte[] record = WriteEvent(deviceEvent);
+                        stream.Write(record, 0, record.Length);
+                        _count++;
+                        WriteHeader(stream);
+                    }
+
+                    return true;
+                }
+                catch (Exception exception)
+                {
+                    Debug.WriteLine("Event flash queue zapis selhal: " + exception.Message);
+                    return false;
+                }
             }
         }
 
@@ -90,14 +140,33 @@ namespace MeteoStanice
         {
             lock (_syncRoot)
             {
-                if (_items.Count == 0)
+                if (_count == 0)
                 {
                     deviceEvent = null;
                     return false;
                 }
 
-                deviceEvent = (NanoDeviceEvent)_items.Peek();
-                return true;
+                try
+                {
+                    using (FileStream stream = new FileStream(QueuePath, FileMode.Open, FileAccess.Read))
+                    {
+                        stream.Seek(HeaderSize + (_head * RecordSize), SeekOrigin.Begin);
+                        byte[] record = new byte[RecordSize];
+                        if (stream.Read(record, 0, record.Length) != record.Length)
+                        {
+                            throw new Exception("neuplny zaznam");
+                        }
+
+                        deviceEvent = ReadEvent(record);
+                        return true;
+                    }
+                }
+                catch (Exception exception)
+                {
+                    Debug.WriteLine("Event flash queue cteni selhalo: " + exception.Message);
+                    deviceEvent = null;
+                    return false;
+                }
             }
         }
 
@@ -106,16 +175,215 @@ namespace MeteoStanice
         /// </summary>
         public bool TryDequeue(out NanoDeviceEvent deviceEvent)
         {
+            return TryDequeueExpected(null, out deviceEvent);
+        }
+
+        /// <summary>
+        /// Removes the oldest event only when it is still the event acknowledged by the API.
+        /// </summary>
+        public bool TryDequeueExpected(string expectedEventGuid, out NanoDeviceEvent deviceEvent)
+        {
             lock (_syncRoot)
             {
-                if (_items.Count == 0)
+                if (!TryPeek(out deviceEvent))
                 {
-                    deviceEvent = null;
                     return false;
                 }
 
-                deviceEvent = (NanoDeviceEvent)_items.Dequeue();
+                if (expectedEventGuid != null && deviceEvent.EventGuid != expectedEventGuid)
+                {
+                    return false;
+                }
+
+                int oldHead = _head;
+                int oldCount = _count;
+                _head = (_head + 1) % _capacity;
+                _count--;
+                if (!SaveHeader())
+                {
+                    _head = oldHead;
+                    _count = oldCount;
+                    return false;
+                }
+
                 return true;
+            }
+        }
+
+        private void Initialize()
+        {
+            lock (_syncRoot)
+            {
+                try
+                {
+                    if (!File.Exists(QueuePath))
+                    {
+                        ResetFile();
+                        return;
+                    }
+
+                    using (FileStream stream = new FileStream(QueuePath, FileMode.Open, FileAccess.Read))
+                    {
+                        byte[] header = new byte[HeaderSize];
+                        if (stream.Read(header, 0, header.Length) != header.Length)
+                        {
+                            throw new Exception("neuplna hlavicka");
+                        }
+
+                        int magic = BitConverter.ToInt32(header, 0);
+                        int version = BitConverter.ToInt32(header, 4);
+                        int storedCapacity = BitConverter.ToInt32(header, 8);
+                        int head = BitConverter.ToInt32(header, 12);
+                        int count = BitConverter.ToInt32(header, 16);
+                        int dropped = BitConverter.ToInt32(header, 20);
+                        if (magic != FileMagic || version != FileVersion || storedCapacity != _capacity
+                            || head < 0 || head >= _capacity || count < 0 || count > _capacity)
+                        {
+                            throw new Exception("neplatna hlavicka");
+                        }
+
+                        _head = head;
+                        _count = count;
+                        _droppedCount = dropped;
+                    }
+
+                    Debug.WriteLine("Event flash queue obnovena, count=" + _count + "/" + _capacity + ".");
+                }
+                catch (Exception exception)
+                {
+                    Debug.WriteLine("Event flash queue je poskozena, vytvarim novou: " + exception.Message);
+                    ResetFile();
+                }
+            }
+        }
+
+        private void ResetFile()
+        {
+            _head = 0;
+            _count = 0;
+            _droppedCount = 0;
+            using (FileStream stream = new FileStream(QueuePath, FileMode.Create, FileAccess.ReadWrite))
+            {
+                WriteHeader(stream);
+            }
+        }
+
+        private bool SaveHeader()
+        {
+            try
+            {
+                using (FileStream stream = new FileStream(QueuePath, FileMode.OpenOrCreate, FileAccess.ReadWrite))
+                {
+                    WriteHeader(stream);
+                }
+
+                return true;
+            }
+            catch (Exception exception)
+            {
+                Debug.WriteLine("Event flash queue hlavicku nelze ulozit: " + exception.Message);
+                return false;
+            }
+        }
+
+        private void WriteHeader(FileStream stream)
+        {
+            byte[] header = new byte[HeaderSize];
+            CopyBytes(BitConverter.GetBytes(FileMagic), header, 0);
+            CopyBytes(BitConverter.GetBytes(FileVersion), header, 4);
+            CopyBytes(BitConverter.GetBytes(_capacity), header, 8);
+            CopyBytes(BitConverter.GetBytes(_head), header, 12);
+            CopyBytes(BitConverter.GetBytes(_count), header, 16);
+            CopyBytes(BitConverter.GetBytes(_droppedCount), header, 20);
+            stream.Seek(0, SeekOrigin.Begin);
+            stream.Write(header, 0, header.Length);
+            stream.Flush();
+        }
+
+        private static byte[] WriteEvent(NanoDeviceEvent deviceEvent)
+        {
+            byte[] record = new byte[RecordSize];
+            int offset = 0;
+            offset = WriteString(record, offset, deviceEvent.EventGuid, EventGuidBytes);
+            offset = WriteString(record, offset, deviceEvent.StationId, StationIdBytes);
+            offset = WriteValue(record, offset, BitConverter.GetBytes(deviceEvent.SequenceNumber));
+            offset = WriteValue(record, offset, BitConverter.GetBytes(deviceEvent.OccurredAt.Ticks));
+            offset = WriteValue(record, offset, BitConverter.GetBytes((int)deviceEvent.Severity));
+            offset = WriteValue(record, offset, BitConverter.GetBytes((int)deviceEvent.Category));
+            offset = WriteValue(record, offset, BitConverter.GetBytes((int)deviceEvent.Code));
+            offset = WriteString(record, offset, deviceEvent.Component, ComponentBytes);
+            WriteString(record, offset, deviceEvent.Message, MessageBytes);
+            return record;
+        }
+
+        private static NanoDeviceEvent ReadEvent(byte[] record)
+        {
+            int offset = 0;
+            NanoDeviceEvent deviceEvent = new NanoDeviceEvent();
+            deviceEvent.EventGuid = ReadString(record, ref offset, EventGuidBytes);
+            deviceEvent.StationId = ReadString(record, ref offset, StationIdBytes);
+            deviceEvent.SequenceNumber = ReadInt32(record, ref offset);
+            deviceEvent.OccurredAt = new DateTime(ReadInt64(record, ref offset), DateTimeKind.Utc);
+            deviceEvent.Severity = (DeviceEventSeverity)ReadInt32(record, ref offset);
+            deviceEvent.Category = (DeviceEventCategory)ReadInt32(record, ref offset);
+            deviceEvent.Code = (DeviceEventCode)ReadInt32(record, ref offset);
+            deviceEvent.Component = ReadString(record, ref offset, ComponentBytes);
+            deviceEvent.Message = ReadString(record, ref offset, MessageBytes);
+            return deviceEvent;
+        }
+
+        private static int WriteString(byte[] target, int offset, string value, int maximumBytes)
+        {
+            byte[] encoded = Encoding.UTF8.GetBytes(value == null ? string.Empty : value);
+            int length = encoded.Length > maximumBytes ? maximumBytes : encoded.Length;
+            offset = WriteValue(target, offset, BitConverter.GetBytes(length));
+            for (int index = 0; index < length; index++)
+            {
+                target[offset + index] = encoded[index];
+            }
+
+            return offset + maximumBytes;
+        }
+
+        private static string ReadString(byte[] source, ref int offset, int maximumBytes)
+        {
+            int length = BitConverter.ToInt32(source, offset);
+            offset += 4;
+            if (length < 0 || length > maximumBytes)
+            {
+                throw new Exception("neplatna delka textu");
+            }
+
+            string value = Encoding.UTF8.GetString(source, offset, length);
+            offset += maximumBytes;
+            return value;
+        }
+
+        private static int ReadInt32(byte[] source, ref int offset)
+        {
+            int value = BitConverter.ToInt32(source, offset);
+            offset += 4;
+            return value;
+        }
+
+        private static long ReadInt64(byte[] source, ref int offset)
+        {
+            long value = BitConverter.ToInt64(source, offset);
+            offset += 8;
+            return value;
+        }
+
+        private static int WriteValue(byte[] target, int offset, byte[] value)
+        {
+            CopyBytes(value, target, offset);
+            return offset + value.Length;
+        }
+
+        private static void CopyBytes(byte[] source, byte[] target, int targetOffset)
+        {
+            for (int index = 0; index < source.Length; index++)
+            {
+                target[targetOffset + index] = source[index];
             }
         }
     }
@@ -126,6 +394,7 @@ namespace MeteoStanice
     public sealed class NanoDeviceEventService
     {
         private readonly NanoDeviceEventQueue _queue;
+        private readonly object _syncRoot = new object();
         private int _sequenceNumber;
         private bool _hasActiveCode;
         private DeviceEventCode _activeCode;
@@ -143,16 +412,36 @@ namespace MeteoStanice
         /// </summary>
         public bool Report(string stationId, DeviceEventSeverity severity, DeviceEventCategory category, DeviceEventCode code, string component, string message)
         {
-            if (_hasActiveCode && _activeCode == code)
+            lock (_syncRoot)
             {
-                return false;
+                if (_hasActiveCode && _activeCode == code)
+                {
+                    return false;
+                }
+
+                _hasActiveCode = true;
+                _activeCode = code;
+                return EnqueueEvent(stationId, severity, category, code, component, message);
             }
+        }
 
+        /// <summary>
+        /// Reports a state transition detected by the caller (for example sensor failure or recovery).
+        /// The caller already debounces the state, so no duplicate suppression is applied here.
+        /// </summary>
+        public bool ReportTransition(string stationId, DeviceEventSeverity severity, DeviceEventCategory category, DeviceEventCode code, string component, string message)
+        {
+            lock (_syncRoot)
+            {
+                return EnqueueEvent(stationId, severity, category, code, component, message);
+            }
+        }
+
+        private bool EnqueueEvent(string stationId, DeviceEventSeverity severity, DeviceEventCategory category, DeviceEventCode code, string component, string message)
+        {
             _sequenceNumber++;
-            _hasActiveCode = true;
-            _activeCode = code;
-
             NanoDeviceEvent deviceEvent = new NanoDeviceEvent();
+            deviceEvent.EventGuid = Guid.NewGuid().ToString();
             deviceEvent.StationId = stationId;
             deviceEvent.SequenceNumber = _sequenceNumber;
             deviceEvent.OccurredAt = DateTime.UtcNow;
@@ -176,7 +465,10 @@ namespace MeteoStanice
         /// </summary>
         public void ClearActive()
         {
-            _hasActiveCode = false;
+            lock (_syncRoot)
+            {
+                _hasActiveCode = false;
+            }
         }
     }
 
@@ -210,11 +502,19 @@ namespace MeteoStanice
 
             if (!_client.UploadEvent(deviceEvent))
             {
+                if (_client.LastUploadRejected)
+                {
+                    // A permanently rejected event would block all later events.
+                    NanoDeviceEvent rejectedEvent;
+                    _queue.TryDequeueExpected(deviceEvent.EventGuid, out rejectedEvent);
+                    Debug.WriteLine("Udalost " + deviceEvent.EventGuid + " odmitnuta serverem (HTTP " + _client.LastHttpStatusCode + "), odstranena z fronty.");
+                }
+
                 return false;
             }
 
-            _queue.TryDequeue(out deviceEvent);
-            return true;
+            NanoDeviceEvent removedEvent;
+            return _queue.TryDequeueExpected(deviceEvent.EventGuid, out removedEvent);
         }
 
         /// <summary>

@@ -1,3 +1,5 @@
+using MeteoStanice.Contracts.Statuses;
+
 namespace MeteoStanice.Monitor.Models;
 
 /// <summary>
@@ -10,60 +12,17 @@ public static class FirmwareEnums
     /// <summary>
     /// MeasurementStatus (docs/ARCHITEKTURA_A_POPIS_SYSTEMU.md, kap. 11.4).
     /// </summary>
-    public static readonly string[] MeasurementStatusNames =
-    [
-        "Ok",
-        "InsufficientSamples",
-        "Sht40ReadFailed",
-        "Bmp280ReadFailed",
-        "Sps30ReadFailed",
-        "BackupPowerActive",
-        "Sps30DisabledOnBattery"
-    ];
+    public static readonly string[] MeasurementStatusNames = FirmwareStatusCatalog.MeasurementStatusNames;
 
     /// <summary>
     /// DeviceEventSeverity.
     /// </summary>
-    public static readonly string[] SeverityNames = ["Information", "Warning", "Error", "Critical"];
+    public static readonly string[] SeverityNames = FirmwareStatusCatalog.EventSeverityNames;
 
     /// <summary>
     /// DeviceEventCode.
     /// </summary>
-    public static readonly string[] EventCodeNames =
-    [
-        "DeviceStarted",
-        "DeviceRestarted",
-        "MainsPowerLost",
-        "MainsPowerRestored",
-        "BackupPowerActivated",
-        "BatteryLow",
-        "BrownoutDetected",
-        "Sht40NotDetected",
-        "Sht40ReadFailed",
-        "Sht40CrcFailed",
-        "Sht40Recovered",
-        "Bmp280NotDetected",
-        "Bmp280ReadFailed",
-        "Bmp280Recovered",
-        "Sps30NotDetected",
-        "Sps30ReadFailed",
-        "Sps30FanError",
-        "Sps30LaserError",
-        "Sps30DisabledOnBattery",
-        "Sps30Restored",
-        "WifiConnectionFailed",
-        "WifiConnected",
-        "ServerUnavailable",
-        "ServerConnectionRestored",
-        "AuthenticationFailed",
-        "ClockSynchronizationFailed",
-        "ClockSynchronized",
-        "LocalQueueNearFull",
-        "LocalQueueFull",
-        "LocalRecordCorrupted",
-        "ConfigurationInvalid",
-        "ConfigurationApplied"
-    ];
+    public static readonly string[] EventCodeNames = FirmwareStatusCatalog.EventCodeNames;
 
     /// <summary>
     /// Poruchova udalost -> skupina (komponenta), ktera je v poruse.
@@ -170,15 +129,7 @@ public static class FirmwareEnums
     /// Prevede ciselnou nebo textovou podobu vyctu na nazev polozky.
     /// </summary>
     public static string Normalize(string? raw, string[] names)
-    {
-        string value = raw?.Trim() ?? string.Empty;
-        if (int.TryParse(value, out int index) && index >= 0 && index < names.Length)
-        {
-            return names[index];
-        }
-
-        return value;
-    }
+        => FirmwareStatusCatalog.Normalize(raw, names);
 
     /// <summary>
     /// Vrati poradi zavaznosti (0 = Information ... 3 = Critical).

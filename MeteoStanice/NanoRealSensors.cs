@@ -14,8 +14,18 @@ namespace MeteoStanice
         private const byte Sht40Address = 0x44;
         private const byte Sps30Address = 0x69;
         private const ushort Sps30StartMeasurementCommand = 0x0010;
+        private const ushort Sps30StopMeasurementCommand = 0x0104;
         private const ushort Sps30ReadDataReadyCommand = 0x0202;
         private const ushort Sps30ReadMeasuredValuesCommand = 0x0300;
+        private const ushort Sps30ReadDeviceStatusCommand = 0xD206;
+        // Values right after start are reported as WAIT; Sensirion states start-up times of 8-30 s depending on concentration.
+        private const int Sps30WarmUpSeconds = 30;
+        private const int Sps30InitRetrySeconds = 60;
+        private const int Sps30FailuresBeforeReset = 3;
+        private const int Sps30StatusCheckEveryReads = 6;
+        private const uint Sps30StatusFanError = 1u << 4;
+        private const uint Sps30StatusLaserError = 1u << 5;
+        private const uint Sps30StatusFanSpeedWarning = 1u << 21;
         private const byte Bmp280PrimaryAddress = 0x76;
         private const byte Bmp280SecondaryAddress = 0x77;
         private const byte Bmp280ChipIdRegister = 0xD0;
@@ -33,7 +43,12 @@ namespace MeteoStanice
         private I2cDevice _bmp280;
         private bool _busInitialized;
         private bool _sps30Initialized;
-        private bool _sps30Unavailable;
+        private bool _sps30Enabled = true;
+        private bool _sps30StatusSupported = true;
+        private long _sps30RetryAfterTicks;
+        private long _sps30StartedTicks;
+        private int _sps30ConsecutiveFailures;
+        private int _sps30ReadsSinceStatusCheck;
         private bool _bmp280Initialized;
         private byte _bmp280Address;
         private byte _bmp280ChipId;
@@ -147,22 +162,42 @@ namespace MeteoStanice
         public Sps30ReadResult ReadSps30()
         {
             Sps30ReadResult result = new Sps30ReadResult();
+            if (!_sps30Enabled)
+            {
+                result.IsSuccess = false;
+                result.Value = null;
+                result.ErrorCode = SensorErrorCode.DisabledOnBattery;
+                result.ErrorMessage = "SPS30 je pri napajeni z baterie zastaven.";
+                return result;
+            }
+
             try
             {
-                if (_sps30Unavailable)
+                if (!_sps30Initialized && DateTime.UtcNow.Ticks < _sps30RetryAfterTicks)
                 {
                     result.IsSuccess = false;
                     result.Value = null;
                     result.ErrorCode = SensorErrorCode.NotDetected;
-                    result.ErrorMessage = "SPS30 nebyl detekovan na I2C adrese 0x69.";
+                    result.ErrorMessage = "SPS30 nebyl detekovan na I2C adrese 0x69, dalsi pokus pozdeji.";
                     return result;
                 }
 
                 EnsureBus();
                 EnsureSps30();
 
+                SensorErrorCode statusError = CheckSps30DeviceStatus();
+                if (statusError != SensorErrorCode.None)
+                {
+                    result.IsSuccess = false;
+                    result.Value = null;
+                    result.ErrorCode = statusError;
+                    result.ErrorMessage = statusError == SensorErrorCode.FanError ? "SPS30 hlasi chybu ventilatoru." : "SPS30 hlasi chybu laseru.";
+                    return result;
+                }
+
                 if (!IsSps30DataReady())
                 {
+                    _sps30ConsecutiveFailures = 0;
                     result.IsSuccess = false;
                     result.Value = null;
                     result.ErrorCode = SensorErrorCode.Timeout;
@@ -171,6 +206,16 @@ namespace MeteoStanice
                 }
 
                 byte[] data = ReadSps30MeasuredValues();
+                _sps30ConsecutiveFailures = 0;
+                if ((DateTime.UtcNow.Ticks - _sps30StartedTicks) < Sps30WarmUpSeconds * TimeSpan.TicksPerSecond)
+                {
+                    result.IsSuccess = false;
+                    result.Value = null;
+                    result.ErrorCode = SensorErrorCode.Timeout;
+                    result.ErrorMessage = "SPS30 se po startu zahriva, hodnoty se zatim neukladaji.";
+                    return result;
+                }
+
                 Sps30Sample sample = new Sps30Sample();
                 sample.MassPm1 = ReadSps30Float(data, 0);
                 sample.MassPm25 = ReadSps30Float(data, 1);
@@ -192,11 +237,116 @@ namespace MeteoStanice
             }
             catch (Exception exception)
             {
+                _sps30ConsecutiveFailures++;
+                if (_sps30ConsecutiveFailures >= Sps30FailuresBeforeReset)
+                {
+                    // Re-create the device and send the start command again on the next read.
+                    ResetSps30("SPS30 opakovane selhal");
+                    _sps30ConsecutiveFailures = 0;
+                }
+
                 result.IsSuccess = false;
                 result.Value = null;
-                result.ErrorCode = SensorErrorCode.CommunicationFailed;
+                result.ErrorCode = _sps30Initialized ? SensorErrorCode.CommunicationFailed : SensorErrorCode.NotDetected;
                 result.ErrorMessage = "SPS30 I2C cteni selhalo: " + exception.Message;
                 return result;
+            }
+        }
+
+        /// <summary>
+        /// Stops the SPS30 fan and laser on battery power and allows a restart on mains power.
+        /// </summary>
+        public void SetSps30Enabled(bool enabled)
+        {
+            if (enabled == _sps30Enabled)
+            {
+                return;
+            }
+
+            _sps30Enabled = enabled;
+            if (enabled)
+            {
+                Debug.WriteLine("SPS30 povolen, mereni se znovu spusti pri dalsim cteni.");
+                return;
+            }
+
+            if (_sps30Initialized && _sps30 != null)
+            {
+                try
+                {
+                    WriteSps30Command(Sps30StopMeasurementCommand);
+                    Thread.Sleep(20);
+                    Debug.WriteLine("SPS30 mereni zastaveno kvuli napajeni z baterie.");
+                }
+                catch (Exception exception)
+                {
+                    Debug.WriteLine("SPS30 stop selhal: " + exception.Message);
+                }
+            }
+
+            ResetSps30("SPS30 zastaven");
+        }
+
+        private void ResetSps30(string reason)
+        {
+            DisposeDevice(_sps30, reason);
+            _sps30 = null;
+            _sps30Initialized = false;
+            _sps30ReadsSinceStatusCheck = 0;
+        }
+
+        /// <summary>
+        /// Reads the SPS30 device status register about once per minute (firmware 2.2 and newer).
+        /// Older sensor firmware does not support the command; the check is then disabled.
+        /// </summary>
+        private SensorErrorCode CheckSps30DeviceStatus()
+        {
+            if (!_sps30StatusSupported)
+            {
+                return SensorErrorCode.None;
+            }
+
+            _sps30ReadsSinceStatusCheck++;
+            if (_sps30ReadsSinceStatusCheck < Sps30StatusCheckEveryReads)
+            {
+                return SensorErrorCode.None;
+            }
+
+            _sps30ReadsSinceStatusCheck = 0;
+            try
+            {
+                WriteSps30Command(Sps30ReadDeviceStatusCommand);
+                Thread.Sleep(5);
+                byte[] data = new byte[6];
+                _sps30.Read(data);
+                if (!IsCrcValid(data, 0) || !IsCrcValid(data, 3))
+                {
+                    return SensorErrorCode.None;
+                }
+
+                uint status = ((uint)ToUInt16(data[0], data[1]) << 16) | ToUInt16(data[3], data[4]);
+                if ((status & Sps30StatusFanSpeedWarning) != 0)
+                {
+                    Debug.WriteLine("SPS30 varovani: otacky ventilatoru mimo rozsah.");
+                }
+
+                if ((status & Sps30StatusFanError) != 0)
+                {
+                    return SensorErrorCode.FanError;
+                }
+
+                if ((status & Sps30StatusLaserError) != 0)
+                {
+                    return SensorErrorCode.LaserError;
+                }
+
+                return SensorErrorCode.None;
+            }
+            catch (Exception exception)
+            {
+                _sps30StatusSupported = false;
+                Debug.WriteLine("SPS30 status registr neni podporovan, kontrola vypnuta: " + exception.Message);
+                return SensorErrorCode.None;
             }
         }
 
@@ -237,12 +387,15 @@ namespace MeteoStanice
                 WriteSps30CommandWithWord(Sps30StartMeasurementCommand, 0x0300);
                 Thread.Sleep(50);
                 _sps30Initialized = true;
+                _sps30StartedTicks = DateTime.UtcNow.Ticks;
+                _sps30ReadsSinceStatusCheck = 0;
                 Debug.WriteLine("SPS30 I2C measurement started at 0x69.");
             }
             catch (Exception exception)
             {
-                _sps30Unavailable = true;
-                Debug.WriteLine("SPS30 init failed: " + exception.Message);
+                ResetSps30("SPS30 init failed");
+                _sps30RetryAfterTicks = DateTime.UtcNow.Ticks + (Sps30InitRetrySeconds * TimeSpan.TicksPerSecond);
+                Debug.WriteLine("SPS30 init failed, dalsi pokus za " + Sps30InitRetrySeconds + " s: " + exception.Message);
                 throw;
             }
         }

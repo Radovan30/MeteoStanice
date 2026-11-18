@@ -20,36 +20,6 @@ namespace MeteoStanice
     }
 
     /// <summary>
-    /// Keeps configuration in RAM for desktop and firmware smoke tests.
-    /// </summary>
-    public sealed class InMemoryStationConfigurationStore : IStationConfigurationStore
-    {
-        // Last configuration saved in this process.
-        private StationConfiguration _configuration;
-        // Distinguishes "not saved" from a null reference.
-        private bool _hasConfiguration;
-
-        /// <summary>
-        /// Attempts to read configuration saved during this process lifetime.
-        /// </summary>
-        public bool TryLoad(out StationConfiguration configuration)
-        {
-            configuration = _configuration;
-            return _hasConfiguration;
-        }
-
-        /// <summary>
-        /// Stores configuration in RAM.
-        /// </summary>
-        public bool Save(StationConfiguration configuration)
-        {
-            _configuration = configuration;
-            _hasConfiguration = configuration != null;
-            return _hasConfiguration;
-        }
-    }
-
-    /// <summary>
     /// Saves station configuration to ESP32 internal flash storage.
     /// </summary>
     public sealed class FlashStationConfigurationStore : IStationConfigurationStore
@@ -127,17 +97,11 @@ namespace MeteoStanice
                 + "DnsAddress=" + Escape(configuration.DnsAddress) + "\n"
                 + "ApiBaseUrl=" + Escape(configuration.ApiBaseUrl) + "\n"
                 + "ApiKey=" + Escape(configuration.ApiKey) + "\n"
-                + "MeasurementIntervalMinutes=" + configuration.MeasurementIntervalMinutes + "\n"
-                + "SamplePeriodSeconds=" + configuration.SamplePeriodSeconds + "\n"
-                + "MeasurementUploadsPerCycle=" + configuration.MeasurementUploadsPerCycle + "\n"
-                + "EventUploadsPerCycle=" + configuration.EventUploadsPerCycle + "\n"
                 + "LocationText=" + Escape(configuration.LocationText) + "\n"
                 + "ProvisioningAccessPointName=" + Escape(configuration.ProvisioningAccessPointName) + "\n"
                 + "ProvisioningPassword=" + Escape(configuration.ProvisioningPassword) + "\n"
                 + "ProvisioningAddress=" + Escape(configuration.ProvisioningAddress) + "\n"
-                + "ProvisioningHostName=" + Escape(configuration.ProvisioningHostName) + "\n"
-                + "ProvisioningWindowMilliseconds=" + configuration.ProvisioningWindowMilliseconds + "\n"
-                + "ProvisioningRequestedOnNextBoot=" + (configuration.ProvisioningRequestedOnNextBoot ? "1" : "0") + "\n";
+                + "ProvisioningWindowMilliseconds=" + configuration.ProvisioningWindowMilliseconds + "\n";
         }
 
         /// <summary>
@@ -165,17 +129,11 @@ namespace MeteoStanice
             configuration.DnsAddress = GetValue(content, "DnsAddress");
             configuration.ApiBaseUrl = StationConfigurationService.NormalizeApiBaseUrl(GetValue(content, "ApiBaseUrl"));
             configuration.ApiKey = GetValue(content, "ApiKey");
-            configuration.MeasurementIntervalMinutes = ParseInt(GetValue(content, "MeasurementIntervalMinutes"), 10);
-            configuration.SamplePeriodSeconds = ParseInt(GetValue(content, "SamplePeriodSeconds"), 1);
-            configuration.MeasurementUploadsPerCycle = ParseInt(GetValue(content, "MeasurementUploadsPerCycle"), 2);
-            configuration.EventUploadsPerCycle = ParseInt(GetValue(content, "EventUploadsPerCycle"), 4);
             configuration.LocationText = GetValue(content, "LocationText");
             configuration.ProvisioningAccessPointName = GetValue(content, "ProvisioningAccessPointName");
             configuration.ProvisioningPassword = GetValue(content, "ProvisioningPassword");
             configuration.ProvisioningAddress = GetValue(content, "ProvisioningAddress");
-            configuration.ProvisioningHostName = GetValue(content, "ProvisioningHostName");
             configuration.ProvisioningWindowMilliseconds = ParseInt(GetValue(content, "ProvisioningWindowMilliseconds"), 30000);
-            configuration.ProvisioningRequestedOnNextBoot = GetValue(content, "ProvisioningRequestedOnNextBoot") == "1";
             return configuration;
         }
 

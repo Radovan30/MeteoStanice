@@ -1,9 +1,16 @@
 using MeteoStanice.Api.Hubs;
+using MeteoStanice.Api.Services;
 using MeteoStanice.Data;
 using MeteoStanice.Quality;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
+
+// appsettings.Local.json (neverzovany) nese lokalni tajne hodnoty, napr. heslo k databazi.
+// Promenne prostredi (Docker, NAS) maji prednost pred vsemi JSON soubory.
+builder.Configuration
+    .AddJsonFile("appsettings.Local.json", optional: true, reloadOnChange: true)
+    .AddEnvironmentVariables();
 
 string connectionString = builder.Configuration.GetConnectionString("MeteoDatabase")
     ?? throw new InvalidOperationException("Connection string 'MeteoDatabase' is not configured.");
@@ -13,6 +20,9 @@ builder.Services.AddDbContext<MeteoDbContext>(options =>
         connectionString,
         npgsqlOptions => npgsqlOptions.MigrationsAssembly(typeof(MeteoDbContext).Assembly.FullName)));
 builder.Services.AddScoped<MeasurementQualityService>();
+builder.Services.AddScoped<StationRegistrationService>();
+builder.Services.AddScoped<SensorSampleAggregationService>();
+builder.Services.AddHostedService<SensorSampleAggregationWorker>();
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();

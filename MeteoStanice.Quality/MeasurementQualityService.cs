@@ -8,28 +8,36 @@ namespace MeteoStanice.Quality;
 public sealed class MeasurementQualityService
 {
     /// <summary>
-    /// Evaluates simple quality checks for one measurement.
+    /// Evaluates rule-based checks for one ten-minute aggregate.
     /// </summary>
+    /// <param name="measurement">Aggregate of the evaluated interval.</param>
+    /// <param name="previousMeasurement">Aggregate of the directly preceding interval, or null after a gap.</param>
+    /// <remarks>
+    /// Thresholds are engineering defaults chosen for the first version and must be justified or
+    /// tuned in the thesis (sensitivity analysis); they are not validated detection limits.
+    /// The range check uses the interval minimum and maximum where available, so a single
+    /// out-of-range sample is not hidden by averaging.
+    /// </remarks>
     public IReadOnlyList<QualityFlagCandidate> Evaluate(Measurement measurement, Measurement? previousMeasurement)
     {
         List<QualityFlagCandidate> flags = [];
+        bool onBattery = string.Equals(measurement.PowerSource, "BAT", StringComparison.OrdinalIgnoreCase);
 
-        CheckRange(flags, "temperature", measurement.TemperatureCelsius, -40, 70, "Teplota je mimo fyzicky ocekavany rozsah.");
-        CheckRange(flags, "humidity", measurement.HumidityPercent, 0, 100, "Vlhkost je mimo rozsah 0-100 %.");
-        CheckRange(flags, "pressure", measurement.PressureHpa, 850, 1100, "Tlak je mimo ocekavany rozsah.");
-        CheckRange(flags, "pm1", measurement.Pm1, 0, 500, "PM1.0 je mimo ocekavany rozsah.");
-        CheckRange(flags, "pm25", measurement.Pm25, 0, 500, "PM2.5 je mimo ocekavany rozsah.");
-        CheckRange(flags, "pm4", measurement.Pm4, 0, 600, "PM4.0 je mimo ocekavany rozsah.");
-        CheckRange(flags, "pm10", measurement.Pm10, 0, 700, "PM10 je mimo ocekavany rozsah.");
-        CheckRange(flags, "numberPm05", measurement.NumberPm05, 0, 100000, "Pocetni koncentrace PM0.5 je mimo ocekavany rozsah.");
-        CheckRange(flags, "numberPm1", measurement.NumberPm1, 0, 100000, "Pocetni koncentrace PM1.0 je mimo ocekavany rozsah.");
-        CheckRange(flags, "numberPm25", measurement.NumberPm25, 0, 100000, "Pocetni koncentrace PM2.5 je mimo ocekavany rozsah.");
-        CheckRange(flags, "numberPm4", measurement.NumberPm4, 0, 100000, "Pocetni koncentrace PM4.0 je mimo ocekavany rozsah.");
-        CheckRange(flags, "numberPm10", measurement.NumberPm10, 0, 100000, "Pocetni koncentrace PM10 je mimo ocekavany rozsah.");
-        CheckRange(flags, "typicalParticleSize", measurement.TypicalParticleSize, 0, 20, "Typicka velikost castic je mimo ocekavany rozsah.");
+        CheckRange(flags, "temperature", measurement.TemperatureCelsius, measurement.TemperatureMin, measurement.TemperatureMax, -40, 70, "Teplota je mimo fyzicky ocekavany rozsah.");
+        CheckRange(flags, "humidity", measurement.HumidityPercent, measurement.HumidityMin, measurement.HumidityMax, 0, 100, "Vlhkost je mimo rozsah 0-100 %.");
+        CheckRange(flags, "pressure", measurement.PressureHpa, measurement.PressureMin, measurement.PressureMax, 850, 1100, "Tlak je mimo ocekavany rozsah.");
+        if (!onBattery || measurement.Sps30OkCount > 0)
+        {
+            // On battery the SPS30 is stopped, so missing PM values are expected (BatteryContext flag).
+            CheckRange(flags, "pm1", measurement.Pm1, null, null, 0, 500, "PM1.0 je mimo ocekavany rozsah.");
+            CheckRange(flags, "pm25", measurement.Pm25, measurement.Pm25Min, measurement.Pm25Max, 0, 500, "PM2.5 je mimo ocekavany rozsah.");
+            CheckRange(flags, "pm4", measurement.Pm4, null, null, 0, 600, "PM4.0 je mimo ocekavany rozsah.");
+            CheckRange(flags, "pm10", measurement.Pm10, measurement.Pm10Min, measurement.Pm10Max, 0, 700, "PM10 je mimo ocekavany rozsah.");
+            CheckRange(flags, "typicalParticleSize", measurement.TypicalParticleSize, null, null, 0, 20, "Typicka velikost castic je mimo ocekavany rozsah.");
+        }
         CheckCompleteness(flags, "sht40", measurement.Sht40OkCount, measurement.ExpectedSampleCount, "SHT40 ma malo platnych vzorku v intervalu.");
         CheckCompleteness(flags, "bmp280", measurement.Bmp280OkCount, measurement.ExpectedSampleCount, "BMP280 ma malo platnych vzorku v intervalu.");
-        if (!string.Equals(measurement.PowerSource, "BAT", StringComparison.OrdinalIgnoreCase))
+        if (!onBattery)
         {
             CheckCompleteness(flags, "sps30", measurement.Sps30OkCount, measurement.ExpectedSampleCount, "SPS30 ma malo platnych vzorku v intervalu.");
         }
@@ -55,7 +63,7 @@ public sealed class MeasurementQualityService
             CheckRepeatedConstant(flags, "pm10", measurement.Pm10, previousMeasurement.Pm10, measurement.Pm10StdDev, previousMeasurement.Pm10StdDev, 0.001, "PM10 je podezrele konstantni i proti predchozimu intervalu.");
         }
 
-        if (string.Equals(measurement.PowerSource, "BAT", StringComparison.OrdinalIgnoreCase))
+        if (onBattery)
         {
             flags.Add(new QualityFlagCandidate
             {
@@ -69,7 +77,7 @@ public sealed class MeasurementQualityService
         return flags;
     }
 
-    private static void CheckRange(List<QualityFlagCandidate> flags, string channelCode, double? value, double min, double max, string message)
+    private static void CheckRange(List<QualityFlagCandidate> flags, string channelCode, double? value, double? intervalMin, double? intervalMax, double min, double max, string message)
     {
         if (value is null)
         {
@@ -83,7 +91,9 @@ public sealed class MeasurementQualityService
             return;
         }
 
-        if (value < min || value > max)
+        double lowest = intervalMin ?? value.Value;
+        double highest = intervalMax ?? value.Value;
+        if (value < min || value > max || lowest < min || highest > max)
         {
             flags.Add(new QualityFlagCandidate
             {
@@ -133,6 +143,11 @@ public sealed class MeasurementQualityService
         }
     }
 
+    /// <summary>
+    /// Flags an interval whose standard deviation is below the sensor resolution, i.e. all readings
+    /// are identical (SHT40 step about 0.0027 °C / 0.002 %RH, BMP280 below 0.01 hPa, SPS30 float output).
+    /// Means close to zero are skipped because clean air may legitimately read a constant 0 µg/m³.
+    /// </summary>
     private static void CheckFlatline(List<QualityFlagCandidate> flags, string channelCode, double? mean, double? standardDeviation, int sampleCount, double threshold, string message)
     {
         if (mean is null || standardDeviation is null || sampleCount < 5)

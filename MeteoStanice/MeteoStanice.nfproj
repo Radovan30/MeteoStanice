@@ -22,19 +22,17 @@
   <Import Project="$(NanoFrameworkProjectSystemPath)NFProjectSystem.props" Condition="Exists('$(NanoFrameworkProjectSystemPath)NFProjectSystem.props')" />
   <ItemGroup>
     <Compile Include="BootConfiguration.cs" />
-    <Compile Include="BootSensorSmoke.cs" />
     <Compile Include="BoardProfile.cs" />
     <Compile Include="ConfigurationStores.cs" />
     <Compile Include="Enums.cs" />
     <Compile Include="NanoDeviceEvents.cs" />
-    <Compile Include="NanoFriendlyMeasurement.cs" />
     <Compile Include="NanoFriendlySensors.cs" />
     <Compile Include="NanoRealSensors.cs" />
-    <Compile Include="NanoRunningStatistics.cs" />
-    <Compile Include="NanoMeasurementCycle.cs" />
-    <Compile Include="NanoMeasurementQueue.cs" />
+    <Compile Include="NanoSensorReader.cs" />
+    <Compile Include="NanoRawSamples.cs" />
     <Compile Include="NanoMeasurementUpload.cs" />
     <Compile Include="NanoUploadWorker.cs" />
+    <Compile Include="NanoRuntimeSupervision.cs" />
     <Compile Include="NanoPowerMonitoring.cs" />
     <Compile Include="NanoClockService.cs" />
     <Compile Include="NanoFrameworkProvisioningPortal.cs" />
@@ -44,7 +42,6 @@
     <Compile Include="NanoTtgoButtons.cs" />
     <Compile Include="NanoTtgoDisplay.cs" />
     <Compile Include="NanoWifiHardwareDiagnostics.cs" />
-    <Compile Include="NanoWifiStatus.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>

@@ -31,6 +31,8 @@ services:
       ASPNETCORE_URLS: http://+:8080
       ConnectionStrings__MeteoDatabase: Host=postgres;Port=5432;Database=meteostanice;Username=meteo;Password=meteo
       StationApi__ApiKey: meteo-local-key
+      # Klic pro administrativni endpointy (korekce SPS30); bez nej jsou zakazane.
+      AdminApi__ApiKey: meteo-admin-key
     ports:
       - "5080:8080"
 

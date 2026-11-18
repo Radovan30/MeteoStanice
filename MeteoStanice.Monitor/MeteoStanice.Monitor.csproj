@@ -21,6 +21,7 @@
   <ItemGroup>
     <!-- Pouze cteni: pouziva se entitovy model a DbContext, migrace se z teto aplikace nikdy nespousti. -->
     <ProjectReference Include="..\MeteoStanice.Data\MeteoStanice.Data.csproj" />
+    <ProjectReference Include="..\MeteoStanice.Contracts\MeteoStanice.Contracts.csproj" />
   </ItemGroup>
 
   <ItemGroup>

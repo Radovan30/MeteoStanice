@@ -36,14 +36,6 @@ namespace MeteoStanice
         public string ApiBaseUrl { get; set; }
         // Optional API key sent with station uploads.
         public string ApiKey { get; set; }
-        // Length of one final measurement interval in minutes.
-        public int MeasurementIntervalMinutes { get; set; }
-        // Delay between individual sensor samples in seconds.
-        public int SamplePeriodSeconds { get; set; }
-        // Maximum measurement records uploaded during one runtime loop.
-        public int MeasurementUploadsPerCycle { get; set; }
-        // Maximum device events uploaded during one runtime loop.
-        public int EventUploadsPerCycle { get; set; }
         // Human-entered station place name shown on the display.
         public string LocationText { get; set; }
         // Name of the temporary setup access point.
@@ -52,12 +44,8 @@ namespace MeteoStanice
         public string ProvisioningPassword { get; set; }
         // Local web address used by the setup portal.
         public string ProvisioningAddress { get; set; }
-        // Legacy friendly setup host name kept for saved configuration compatibility.
-        public string ProvisioningHostName { get; set; }
-        // Setup window length after boot.
+        // Maximum time the setup portal waits for one form submission.
         public int ProvisioningWindowMilliseconds { get; set; }
-        // True when the next boot should enter setup mode before meteo mode.
-        public bool ProvisioningRequestedOnNextBoot { get; set; }
     }
 
     /// <summary>
@@ -82,6 +70,7 @@ namespace MeteoStanice
     /// </summary>
     public sealed class StationConfigurationService
     {
+        public const string CurrentFirmwareVersion = "0.4.0";
         // Default setup window length after boot.
         private const int DefaultProvisioningWindowMilliseconds = 60000;
         private const string DefaultProvisioningPassword = "12345678";
@@ -147,6 +136,13 @@ namespace MeteoStanice
                     Debug.WriteLine("Station GUID vytvoren a ulozen: " + configuration.StationGuid);
                 }
 
+                if (configuration.FirmwareVersion != CurrentFirmwareVersion)
+                {
+                    configuration.FirmwareVersion = CurrentFirmwareVersion;
+                    _configurationStore.Save(configuration);
+                    Debug.WriteLine("Firmware verze aktualizovana v konfiguraci: " + CurrentFirmwareVersion);
+                }
+
                 bool upgraded = EnsureRuntimeDefaults(configuration);
                 if (upgraded)
                 {
@@ -171,8 +167,8 @@ namespace MeteoStanice
             configuration.StationId = "METEO-TEST-001";
             configuration.StationGuid = CreateStationGuid();
             configuration.DeviceHardwareId = CreateHardwareId();
-            configuration.StationName = "XIAO ESP32C3 meteostanice";
-            configuration.FirmwareVersion = "0.1.0-test";
+            configuration.StationName = "TTGO T-Display meteostanice";
+            configuration.FirmwareVersion = CurrentFirmwareVersion;
             configuration.WifiSsid = string.Empty;
             configuration.WifiPassword = string.Empty;
             configuration.UseDhcp = true;
@@ -182,17 +178,11 @@ namespace MeteoStanice
             configuration.DnsAddress = "8.8.8.8";
             configuration.ApiBaseUrl = string.Empty;
             configuration.ApiKey = string.Empty;
-            configuration.MeasurementIntervalMinutes = 10;
-            configuration.SamplePeriodSeconds = 1;
-            configuration.MeasurementUploadsPerCycle = 2;
-            configuration.EventUploadsPerCycle = 4;
             configuration.LocationText = string.Empty;
             configuration.ProvisioningAccessPointName = BoardProfile.ProvisioningAccessPointName;
             configuration.ProvisioningPassword = DefaultProvisioningPassword;
             configuration.ProvisioningAddress = DefaultProvisioningAddress;
-            configuration.ProvisioningHostName = "meteo";
             configuration.ProvisioningWindowMilliseconds = DefaultProvisioningWindowMilliseconds;
-            configuration.ProvisioningRequestedOnNextBoot = false;
             return configuration;
         }
 
@@ -255,30 +245,6 @@ namespace MeteoStanice
         private static bool EnsureRuntimeDefaults(StationConfiguration configuration)
         {
             bool changed = false;
-
-            if (configuration.MeasurementIntervalMinutes < 1)
-            {
-                configuration.MeasurementIntervalMinutes = 10;
-                changed = true;
-            }
-
-            if (configuration.SamplePeriodSeconds < 1)
-            {
-                configuration.SamplePeriodSeconds = 1;
-                changed = true;
-            }
-
-            if (configuration.MeasurementUploadsPerCycle < 1)
-            {
-                configuration.MeasurementUploadsPerCycle = 2;
-                changed = true;
-            }
-
-            if (configuration.EventUploadsPerCycle < 1)
-            {
-                configuration.EventUploadsPerCycle = 4;
-                changed = true;
-            }
 
             if (configuration.LocationText == null)
             {
@@ -359,8 +325,7 @@ namespace MeteoStanice
             Debug.WriteLine("Setup web: http://" + configuration.ProvisioningAddress + "/");
             Debug.WriteLine("Meteo Wi-Fi: " + (configuration.WifiSsid == string.Empty ? "<nenastaveno>" : configuration.WifiSsid));
             Debug.WriteLine("Meteo IP: " + (configuration.UseDhcp ? "DHCP" : configuration.StaticIpAddress));
-            Debug.WriteLine("Mereni interval: " + configuration.MeasurementIntervalMinutes + " min.");
-            Debug.WriteLine("Vzorkovani: " + configuration.SamplePeriodSeconds + " s.");
+            Debug.WriteLine("Vzorkovani: pevne 10 s, agregace 10 min probiha na backendu.");
             Debug.WriteLine("Lokace: " + (configuration.LocationText == null || configuration.LocationText.Length == 0 ? "<nenastaveno>" : configuration.LocationText));
         }
     }

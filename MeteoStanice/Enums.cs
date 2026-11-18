@@ -6,55 +6,23 @@ namespace MeteoStanice
     public enum SensorErrorCode
     {
         // Successful read.
-        None,
+        None = 0,
         // Physical sensor was not found on its bus.
-        NotDetected,
+        NotDetected = 1,
         // Sensor did not respond before timeout.
-        Timeout,
+        Timeout = 2,
         // Sensor frame was received but checksum was invalid.
-        CrcFailed,
+        CrcFailed = 3,
         // Sensor returned data in unexpected format.
-        InvalidResponse,
+        InvalidResponse = 4,
         // I2C, UART or driver communication failed.
-        CommunicationFailed,
+        CommunicationFailed = 5,
         // SPS30 reported fan failure.
-        FanError,
+        FanError = 6,
         // SPS30 reported laser failure.
-        LaserError,
+        LaserError = 7,
         // Sensor was skipped intentionally to save battery.
-        DisabledOnBattery
-    }
-
-    /// <summary>
-    /// Describes current sensor availability.
-    /// </summary>
-    public enum SensorHealth
-    {
-        // Sensor has not been initialized or read yet.
-        Unknown,
-        // Sensor is initialized and ready.
-        Ready,
-        // Sensor works but recently showed errors.
-        Degraded,
-        // Sensor cannot be used.
-        Failed,
-        // Sensor is intentionally not running.
-        Disabled
-    }
-
-    /// <summary>
-    /// Describes sensor initialization outcome.
-    /// </summary>
-    public enum SensorInitializationResult
-    {
-        // Hardware initialization succeeded.
-        Success,
-        // Hardware address or response was missing.
-        NotDetected,
-        // Bus communication failed during setup.
-        CommunicationFailed,
-        // Real driver is not implemented in this firmware build.
-        Unsupported
+        DisabledOnBattery = 8
     }
 
     /// <summary>
@@ -63,21 +31,21 @@ namespace MeteoStanice
     public enum DeviceEventCategory
     {
         // Sensor-related event.
-        Sensor,
+        Sensor = 0,
         // Bus or protocol communication event.
-        Communication,
+        Communication = 1,
         // Wi-Fi or internet event.
-        Network,
+        Network = 2,
         // Clock or NTP event.
-        Time,
+        Time = 3,
         // Main power or battery event.
-        Power,
+        Power = 4,
         // Flash or queue event.
-        Storage,
+        Storage = 5,
         // Local or remote configuration event.
-        Configuration,
+        Configuration = 6,
         // Firmware lifecycle event.
-        System
+        System = 7
     }
 
     /// <summary>
@@ -86,13 +54,13 @@ namespace MeteoStanice
     public enum DeviceEventSeverity
     {
         // Informational state transition.
-        Information,
+        Information = 0,
         // Non-critical degraded state.
-        Warning,
+        Warning = 1,
         // Component or communication failure.
-        Error,
+        Error = 2,
         // Data loss or device-critical condition.
-        Critical
+        Critical = 3
     }
 
     /// <summary>
@@ -101,106 +69,69 @@ namespace MeteoStanice
     public enum DeviceEventCode
     {
         // Firmware booted.
-        DeviceStarted,
+        DeviceStarted = 0,
         // Firmware restarted after previous run.
-        DeviceRestarted,
+        DeviceRestarted = 1,
         // Main 5V source disappeared.
-        MainsPowerLost,
+        MainsPowerLost = 2,
         // Main 5V source returned.
-        MainsPowerRestored,
+        MainsPowerRestored = 3,
         // Backup power became active.
-        BackupPowerActivated,
+        BackupPowerActivated = 4,
         // Battery voltage crossed low threshold.
-        BatteryLow,
+        BatteryLow = 5,
         // Brownout condition was detected.
-        BrownoutDetected,
+        BrownoutDetected = 6,
         // SHT40 was missing at initialization.
-        Sht40NotDetected,
+        Sht40NotDetected = 7,
         // SHT40 read operation failed.
-        Sht40ReadFailed,
+        Sht40ReadFailed = 8,
         // SHT40 returned bad CRC.
-        Sht40CrcFailed,
+        Sht40CrcFailed = 9,
         // SHT40 recovered after failure.
-        Sht40Recovered,
+        Sht40Recovered = 10,
         // BMP280 was missing at initialization.
-        Bmp280NotDetected,
+        Bmp280NotDetected = 11,
         // BMP280 read operation failed.
-        Bmp280ReadFailed,
+        Bmp280ReadFailed = 12,
         // BMP280 recovered after failure.
-        Bmp280Recovered,
+        Bmp280Recovered = 13,
         // SPS30 was missing at initialization.
-        Sps30NotDetected,
+        Sps30NotDetected = 14,
         // SPS30 read operation failed.
-        Sps30ReadFailed,
+        Sps30ReadFailed = 15,
         // SPS30 reported fan diagnostics.
-        Sps30FanError,
+        Sps30FanError = 16,
         // SPS30 reported laser diagnostics.
-        Sps30LaserError,
+        Sps30LaserError = 17,
         // SPS30 was intentionally stopped on battery.
-        Sps30DisabledOnBattery,
+        Sps30DisabledOnBattery = 18,
         // SPS30 recovered after failure.
-        Sps30Restored,
+        Sps30Restored = 19,
         // Wi-Fi connection attempt failed.
-        WifiConnectionFailed,
+        WifiConnectionFailed = 20,
         // Wi-Fi connected successfully.
-        WifiConnected,
+        WifiConnected = 21,
         // Server could not be reached.
-        ServerUnavailable,
+        ServerUnavailable = 22,
         // Server connectivity recovered.
-        ServerConnectionRestored,
+        ServerConnectionRestored = 23,
         // Server rejected credentials or token.
-        AuthenticationFailed,
+        AuthenticationFailed = 24,
         // Clock sync attempt failed.
-        ClockSynchronizationFailed,
+        ClockSynchronizationFailed = 25,
         // Clock sync succeeded.
-        ClockSynchronized,
+        ClockSynchronized = 26,
         // Queue is approaching capacity.
-        LocalQueueNearFull,
+        LocalQueueNearFull = 27,
         // Queue has no free capacity.
-        LocalQueueFull,
+        LocalQueueFull = 28,
         // Stored record failed validation.
-        LocalRecordCorrupted,
+        LocalRecordCorrupted = 29,
         // Configuration failed validation.
-        ConfigurationInvalid,
+        ConfigurationInvalid = 30,
         // Configuration was saved and applied.
-        ConfigurationApplied
+        ConfigurationApplied = 31
     }
 
-    /// <summary>
-    /// Describes quality and limitations of one measurement interval.
-    /// </summary>
-    public enum MeasurementStatus
-    {
-        // Interval contains enough valid data.
-        Ok,
-        // Too many samples were missing.
-        InsufficientSamples,
-        // SHT40 failed during this interval.
-        Sht40ReadFailed,
-        // BMP280 failed during this interval.
-        Bmp280ReadFailed,
-        // SPS30 failed during this interval.
-        Sps30ReadFailed,
-        // Backup battery was active during this interval.
-        BackupPowerActive,
-        // SPS30 was intentionally skipped on battery.
-        Sps30DisabledOnBattery
-    }
-
-    /// <summary>
-    /// Describes how station location was obtained.
-    /// </summary>
-    public enum LocationSource
-    {
-        // Location has not been resolved.
-        Unknown,
-        // Operator entered the location.
-        Manual,
-        // Server estimated location from Wi-Fi scan.
-        WifiGeolocation,
-        // GPS receiver provided the location.
-        Gps,
-        // Server estimated location from internet address.
-        IpAddress
-    }
 }

@@ -6,6 +6,16 @@ namespace MeteoStanice.Contracts.Events;
 public sealed class DeviceEventUploadRequest
 {
     /// <summary>
+    /// JSON protocol version used by station firmware.
+    /// </summary>
+    public int ProtocolVersion { get; set; }
+
+    /// <summary>
+    /// Stable event identity generated once by firmware and reused during retries.
+    /// </summary>
+    public Guid EventGuid { get; set; }
+
+    /// <summary>
     /// Stable station GUID generated and stored by the firmware.
     /// </summary>
     public Guid StationGuid { get; set; }
@@ -31,7 +41,7 @@ public sealed class DeviceEventUploadRequest
     public string FirmwareVersion { get; set; } = string.Empty;
 
     /// <summary>
-    /// Station-local monotonically increasing event sequence.
+    /// Station-local diagnostic order. This value is not used as event identity.
     /// </summary>
     public int SequenceNumber { get; set; }
 

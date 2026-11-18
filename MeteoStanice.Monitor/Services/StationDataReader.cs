@@ -62,6 +62,7 @@ public sealed class StationDataReader(string connectionString)
             if (latest is not null)
             {
                 MarkMissingValues(latest);
+                ApplySps30Correction(latest, station.Sps30CorrectionPercent);
             }
 
             snapshots.Add(new StationSnapshot
@@ -106,5 +107,29 @@ public sealed class StationDataReader(string connectionString)
             measurement.PressureHpa = null;
             measurement.PressureMin = measurement.PressureMax = measurement.PressureStdDev = null;
         }
+    }
+
+    /// <summary>
+    /// Applies the station-specific SPS30 display correction to an untracked entity.
+    /// Raw database values remain unchanged.
+    /// </summary>
+    private static void ApplySps30Correction(Measurement measurement, double correctionPercent)
+    {
+        if (correctionPercent == 0 || measurement.Sps30OkCount == 0)
+        {
+            return;
+        }
+
+        double factor = 1 + correctionPercent / 100.0;
+        measurement.Pm1 *= factor;
+        measurement.Pm25 *= factor;
+        measurement.Pm4 *= factor;
+        measurement.Pm10 *= factor;
+        measurement.Pm25Min *= factor;
+        measurement.Pm25Max *= factor;
+        measurement.Pm25StdDev *= factor;
+        measurement.Pm10Min *= factor;
+        measurement.Pm10Max *= factor;
+        measurement.Pm10StdDev *= factor;
     }
 }

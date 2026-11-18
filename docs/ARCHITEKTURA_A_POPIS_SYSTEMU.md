@@ -7,7 +7,7 @@ Tento dokument popisuje aktuální technický stav systému MeteoStanice. Je ur�
 - fyzickou meteostanici založenou na ESP32 a .NET nanoFramework,
 - připojené senzory a způsob jejich čtení,
 - lokální konfiguraci stanice,
-- agregaci, ukládání do fronty a odesílání měření,
+- sběr surových vzorků, jejich odolné frontování a backendovou agregaci,
 - backendové REST API v ASP.NET Core,
 - databázi PostgreSQL a význam všech tabulek a sloupců,
 - registraci a rozlišení více fyzických stanic,
@@ -23,7 +23,7 @@ Dokument rozlišuje mezi funkcemi, které jsou již implementovány, a funkcemi 
 Cílem systému je provozovat více samostatných nízkonákladových meteostanic, které:
 
 1. periodicky čtou fyzikální veličiny z připojených senzorů,
-2. vytvářejí časově zarovnané intervalové záznamy,
+2. odesílají časově zarovnané desetisekundové vzorky,
 3. uchovávají diagnostické informace o kvalitě jednotlivých čtení,
 4. odesílají výsledky přes Wi-Fi do centrálního API,
 5. automaticky se registrují v backendu,
@@ -48,7 +48,7 @@ flowchart LR
     API --> QC[Pravidlová kontrola kvality]
     API --> SIGNALR[SignalR hub]
     SIGNALR --> DASH[Budoucí dashboard]
-    DB --> ANALYTICS[Budoucí kalibrace,\nstatistika a AI diagnostika]
+    DB --> ANALYTICS[SPS30 korekce,\nstatistika a AI diagnostika]
 ```
 
 Systém se skládá z následujících vrstev:
@@ -56,13 +56,13 @@ Systém se skládá z následujících vrstev:
 | Vrstva | Projekt nebo zařízení | Úloha |
 |---|---|---|
 | Senzorická vrstva | SHT40, BMP280, SPS30 | Fyzické měření prostředí |
-| Vestavěná vrstva | `MeteoStanice` | Firmware ESP32, měření, agregace, setup, komunikace |
+| Vestavěná vrstva | `MeteoStanice` | Firmware ESP32, vzorkování, offline fronta, setup, komunikace |
 | Přenosová vrstva | Wi-Fi, HTTP, JSON | Přenos měření a událostí |
 | Aplikační vrstva | `MeteoStanice.Api` | Registrace stanic, příjem dat, API, migrace |
 | Datová vrstva | `MeteoStanice.Data` | Entity Framework Core model a PostgreSQL |
 | Kontraktní vrstva | `MeteoStanice.Contracts` | Datové objekty přenášené mezi zařízeními a API |
 | Vrstva kvality | `MeteoStanice.Quality` | Pravidlové vyhodnocení kvality měření |
-| Prezentační vrstva | `MeteoStanice.Web`, `MeteoStanice.Desktop` | Zatím pouze připravené základní projekty |
+| Prezentační vrstva | `MeteoStanice.Monitor`, `MeteoStanice.Web` | Funkční WPF monitor a připravená kostra webového dashboardu |
 
 ## 4. Struktura řešení
 
@@ -72,10 +72,12 @@ Firmware pro LILYGO TTGO T-Display ESP32. Cílovou platformou je `.NET nanoFrame
 
 - ovladače I2C senzorů,
 - hlavní nekonečnou provozní smyčku,
-- časově zarovnanou agregaci měření,
-- fronty měření a událostí,
+- časově zarovnané desetisekundové vzorkování,
+- RAM staging a kruhovou flash frontu surových vzorků,
+- samostatnou kruhovou flash frontu událostí,
 - HTTP klienta,
-- Wi-Fi klienta,
+- Wi-Fi klienta s automatickým obnovením spojení,
+- sledování poruch a zotavení senzorů (události),
 - SoftAP provisioning portal,
 - práci s interní flash pamětí,
 - obsluhu tlačítka,
@@ -87,11 +89,12 @@ Firmware pro LILYGO TTGO T-Display ESP32. Cílovou platformou je `.NET nanoFrame
 
 ASP.NET Core Web API pro .NET 10. Obsahuje:
 
-- endpointy pro měření a události,
-- automatickou registraci fyzických stanic,
-- autentizaci zařízení pomocí API klíče,
+- příjem surových desetisekundových vzorků a událostí,
+- backendovou desetiminutovou agregaci a čtení agregátů,
+- automatickou registraci fyzických stanic (`StationRegistrationService`),
+- autentizaci zařízení pomocí API klíče a oddělený administrátorský klíč,
 - automatické databázové migrace při startu,
-- kontrolu kvality přijatých měření,
+- kontrolu kvality agregovaných měření,
 - SignalR hub pro budoucí živý dashboard,
 - Swagger dokumentaci.
 
@@ -101,21 +104,33 @@ Datová vrstva používající Entity Framework Core 10 a provider Npgsql pro Po
 
 ### 4.4 Projekt `MeteoStanice.Contracts`
 
-Definuje přenosové objekty:
+Definuje přenosové objekty a sdílené katalogy:
 
-- `MeasurementUploadRequest`,
+- `SensorSampleUploadRequest`, `SensorSampleDto`, `SensorSamplePageDto`, `SensorSampleUploadResultDto`,
 - `MeasurementDto`,
-- `DeviceEventUploadRequest`,
-- `DeviceEventDto`,
-- `QualityFlagDto`.
+- `DeviceEventUploadRequest`, `DeviceEventDto`,
+- `StationDto`, `UpdateSps30CorrectionRequest`,
+- `QualityFlagDto`,
+- `FirmwareProtocol` (verze JSON protokolu),
+- `FirmwareStatusCatalog` (číselníky stavů a událostí sdílené s firmwarem a Monitorem).
 
 ### 4.5 Projekt `MeteoStanice.Quality`
 
-Obsahuje první vrstvu automatické kontroly dat založenou na explicitních pravidlech a statistických hodnotách vypočtených ve stanici.
+Obsahuje první vrstvu automatické kontroly dat založenou na explicitních pravidlech a statistikách vypočtených backendovou agregací (`MeasurementQualityService`) a katalog názvů kanálů a kontrol (`QualityCatalog`).
 
-### 4.6 Projekty `MeteoStanice.Web` a `MeteoStanice.Desktop`
+### 4.6 Projekt `MeteoStanice.Monitor`
 
-Tyto projekty jsou nyní pouze výchozí kostry aplikací. Web obsahuje demonstrační stránky vytvořené šablonou a desktopová aplikace prázdné WPF okno. Nejde zatím o funkční dashboard systému.
+Funkční WPF monitor čte PostgreSQL v režimu pouze pro čtení, zobrazuje poslední data všech aktivních stanic, vyhodnocuje jejich dostupnost a senzorové problémy a spouští zvukové alarmy. Hmotnostní koncentrace SPS30 pro zobrazení upravuje podle `Stations.Sps30CorrectionPercent`; raw databázové hodnoty nemění.
+
+### 4.7 Projekt `MeteoStanice.Web`
+
+Připravená kostra webového dashboardu (Blazor). Obsahuje pouze úvodní stránku s popisem; ukázkové stránky šablony byly odstraněny. Funkční dashboard zatím není implementován. Dřívější prázdný projekt `MeteoStanice.Desktop` byl odstraněn, jeho roli plní `MeteoStanice.Monitor`.
+
+### 4.8 Solution soubory
+
+- `MeteoStanice.Backend.sln` – API, Data, Contracts, Quality, Web a Monitor,
+- `MeteoStanice.Monitor.sln` – samostatné otevření Monitoru,
+- `MeteoStanice.slnx` – firmware (vyžaduje rozšíření .NET nanoFramework pro Visual Studio).
 
 ## 5. Hardwarová část meteostanice
 
@@ -183,14 +198,22 @@ Zpracovávané hodnoty:
 - hmotnostní koncentrace PM2.5,
 - hmotnostní koncentrace PM4.0,
 - hmotnostní koncentrace PM10,
-- početní koncentrace částic nad 0,5 um,
-- početní koncentrace částic nad 1,0 um,
-- početní koncentrace částic nad 2,5 um,
-- početní koncentrace částic nad 4,0 um,
-- početní koncentrace částic nad 10 um,
+- početní koncentrace NC0,5 (částice 0,3–0,5 µm),
+- početní koncentrace NC1,0 (0,3–1,0 µm),
+- početní koncentrace NC2,5 (0,3–2,5 µm),
+- početní koncentrace NC4,0 (0,3–4,0 µm),
+- početní koncentrace NC10 (0,3–10 µm),
 - typická velikost částic.
 
-Před čtením hodnot se kontroluje příznak připravenosti dat. Data SPS30 jsou chráněna CRC po jednotlivých datových slovech. Pokud data ještě nejsou připravena, stav je veden jako `WAIT`, nikoli jako tvrdá chyba senzoru.
+Všech deset hodnot se přenáší na backend (od protokolu verze 2 včetně početních koncentrací v #/cm³).
+
+Před čtením hodnot se kontroluje příznak připravenosti dat. Data SPS30 jsou chráněna CRC po jednotlivých datových slovech. Pokud data ještě nejsou připravena, stav je veden jako `WAIT` (kód `Timeout`), nikoli jako tvrdá chyba senzoru.
+
+Další ošetření SPS30 ve firmwaru:
+
+- **Náběh po startu:** prvních 30 s po spuštění měření se hodnoty neukládají a vzorek má stav `WAIT`. Sensirion uvádí dobu ustálení 8 až 30 s podle koncentrace.
+- **Stavový registr:** přibližně jednou za minutu firmware čte registr stavu zařízení (příkaz `0xD206`, firmware senzoru 2.2 a novější). Bit poruchy ventilátoru vede na `FanError`, bit poruchy laseru na `LaserError`. Pokud senzor příkaz nepodporuje, kontrola se vypne.
+- **Obnova:** nezdařená inicializace se opakuje po 60 s. Po třech po sobě jdoucích chybách komunikace se zařízení znovu vytvoří a měření se znovu spustí. Senzor tak není „ztracen“ až do restartu stanice.
 
 ### 5.5 Napájení
 
@@ -204,7 +227,7 @@ Aktuální prahy:
 | Nízká baterie | méně než 3,5 V |
 | Rozlišení baterie a externího zdroje | 3,9 V |
 
-Při provozu na baterii se SPS30 záměrně nečte, aby se snížila spotřeba. Tato skutečnost se ukládá do diagnostických počtů a stavu intervalu.
+Při provozu na baterii firmware SPS30 zastaví příkazem `Stop Measurement` (`0x0104`), čímž vypne ventilátor a laser jako největší odběr. Vzorek má u SPS30 stav `DisabledOnBattery`, backend jej započítá do `Sps30BatterySkippedCount` a stav intervalu je `Sps30DisabledOnBattery`. Po návratu síťového napájení se měření znovu spustí a prvních 30 s platí náběhová doba. Přechod je zaznamenán událostmi `Sps30DisabledOnBattery` a `Sps30Restored`.
 
 ## 6. Identita stanice
 
@@ -254,8 +277,8 @@ I:\meteo.cfg
 | `StationId` | Provozní kód stanice | `METEO-TEST-001` |
 | `StationGuid` | Trvalý GUID stanice | automaticky vytvořen |
 | `DeviceHardwareId` | Trvalá identita desky | automaticky vytvořena |
-| `StationName` | Čitelný název zařízení | testovací název |
-| `FirmwareVersion` | Verze firmwaru | `0.1.0-test` |
+| `StationName` | Čitelný název zařízení, používá se i jako síťové jméno | `TTGO T-Display meteostanice`, po registraci kód z backendu |
+| `FirmwareVersion` | Verze firmwaru | `0.4.0` |
 | `WifiSsid` | SSID provozní Wi-Fi | prázdné |
 | `WifiPassword` | Heslo provozní Wi-Fi | prázdné |
 | `UseDhcp` | Použití DHCP | `true` |
@@ -265,19 +288,13 @@ I:\meteo.cfg
 | `DnsAddress` | DNS server | `8.8.8.8` |
 | `ApiBaseUrl` | Základní URL API | prázdné |
 | `ApiKey` | Klíč v HTTP hlavičce | prázdné |
-| `MeasurementIntervalMinutes` | Délka výsledného intervalu | 10 minut |
-| `SamplePeriodSeconds` | Perioda čtení senzorů | 1 sekunda |
-| `MeasurementUploadsPerCycle` | Historická konfigurace limitu uploadu | 2 |
-| `EventUploadsPerCycle` | Historická konfigurace limitu uploadu událostí | 4 |
-| `LocationText` | Textové místo stanice | prázdné |
+| `LocationText` | Textové místo stanice, posílá se na backend do `Stations.LocationText` | prázdné |
 | `ProvisioningAccessPointName` | Název setup AP | `MeteoStanice-TTGO-Setup` |
 | `ProvisioningPassword` | Heslo setup AP | `12345678` |
 | `ProvisioningAddress` | IP setup portálu | `192.168.4.1` |
-| `ProvisioningHostName` | Starší kompatibilní alias | `meteo` |
-| `ProvisioningWindowMilliseconds` | Starší délka setup okna | 60000 ms |
-| `ProvisioningRequestedOnNextBoot` | Starší příznak setupu po restartu | `false` |
+| `ProvisioningWindowMilliseconds` | Nejdelší čekání setup portálu na jedno odeslání formuláře | 60000 ms |
 
-Položky `MeasurementUploadsPerCycle` a `EventUploadsPerCycle` jsou v konfiguraci zachovány, ale aktuální samostatný upload worker odesílá vždy nejvýše jeden záznam v jednom průchodu. Tyto položky nyní přímo neřídí pracovní vlákno.
+Firmware 0.4.0 odstranil nepoužívané položky `MeasurementIntervalMinutes`, `SamplePeriodSeconds`, `MeasurementUploadsPerCycle`, `EventUploadsPerCycle`, `ProvisioningHostName` a `ProvisioningRequestedOnNextBoot`. Vzorkování je pevně 10 s a agregace 10 min probíhá na backendu, takže tyto hodnoty nic neřídily. Starší konfigurační soubor se načte bez chyby: neznámé klíče se ignorují a při dalším uložení zmizí.
 
 ### 7.2 Validace konfigurace
 
@@ -296,7 +313,7 @@ Setup režim se nespouští automaticky po restartu. Stanice standardně startuj
 
 Po stisku tlačítka firmware:
 
-1. pozastaví upload worker,
+1. pozastaví upload worker a počká na dokončení právě probíhajícího uploadu nebo obnovy Wi-Fi (nejvýše 70 s),
 2. zobrazí setup režim na displeji,
 3. odpojí klientské připojení k provozní Wi-Fi,
 4. aktivuje SoftAP,
@@ -324,9 +341,6 @@ Formulář obsahuje:
 - bránu,
 - masku,
 - DNS,
-- interval výsledného měření,
-- periodu vzorkování,
-- historické limity uploadu,
 - textové místo meteostanice.
 
 Po odeslání formuláře se konfigurace uloží do flash a ihned se znovu načte a ověří. Web vrátí stránku `ULOZENO` nebo `CHYBA`. Setup zůstává aktivní, dokud uživatel znovu nestiskne tlačítko.
@@ -339,10 +353,12 @@ Při ukončení setupu firmware:
 2. vypne SoftAP,
 3. načte aktuální konfiguraci z flash,
 4. znovu vytvoří identitu a měřicí cyklus,
-5. připojí se k nastavené Wi-Fi,
+5. připojí se k nastavené Wi-Fi a předá výsledek dohledu nad Wi-Fi (`NanoWifiSupervisor`),
 6. synchronizuje čas,
 7. nastaví API klienta,
 8. obnoví upload worker.
+
+Během setup režimu stanice neměří. V datech proto vznikne mezera, kterou je při analýze potřeba odlišit od poruchy (časy setupu lze dohledat podle výpadku vzorků při běžícím napájení).
 
 ## 9. Připojení k Wi-Fi a API
 
@@ -357,6 +373,8 @@ Firmware podporuje:
 - DNS server.
 
 Při připojování zobrazuje diagnostické stavy jako `POKUS`, `HESLO CHYBA`, `SIT NENALEZ`, `AUTH CHYBA`, `DHCP TIMEOUT` nebo `PRIPOJENO`.
+
+Obnova spojení (od firmwaru 0.4.0): ovladač se připojuje v režimu `WifiReconnectionKind.Manual`, proto spojení hlídá `NanoWifiSupervisor` ve vlákně upload workeru. Spojení se považuje za ztracené, když se při DHCP ztratí IPv4 adresa nebo když tři pokusy o upload po sobě skončí bez jakékoli HTTP odpovědi. Pokusy o nové připojení probíhají s exponenciálním odstupem 1, 2, 4, 8 a nejvýše 10 minut. Pokus blokuje jen upload worker, takže desetisekundové vzorkování běží dál a vzorky čekají ve flash frontě. Pokud se Wi-Fi nepřipojí při startu, supervisor to zkouší znovu stejným způsobem. Ztráta a obnova spojení se zaznamená událostmi `WifiConnectionFailed` a `WifiConnected`.
 
 ### 9.2 API URL
 
@@ -384,23 +402,27 @@ Firmware synchronizuje systémový čas pomocí NTP serveru `pool.ntp.org`.
 | NTP port | UDP 123 |
 | Timeout | 4 s |
 | Standardní synchronizace | každých 6 hodin |
-| Opakování po chybě | za 15 minut |
+| Opakování po chybě | za 15 minut, před první úspěšnou synchronizací za 60 s |
 | Doba důvěry v synchronizaci | 24 hodin |
 
 Do databáze se ukládají UTC časy. Pro zobrazení se mají převádět do časové zóny `Europe/Prague`.
 
-Displej firmwaru nyní používá pevný posun UTC+2. Toto řešení samo nezohledňuje zimní čas a patří mezi známá omezení. Backend a PostgreSQL pracují korektně s UTC a mohou používat časovou zónu `Europe/Prague` v dotazech.
+**Vzorky vznikají až po první úspěšné synchronizaci času** (`NanoClockService.HasValidTime()`: synchronizace od startu a rok alespoň 2025). Bez ní by hodiny ESP32 začínaly v roce 1970, vzorky různých startů by měly shodné časové značky a backend by je tiše zahodil jako duplicity. Do synchronizace displej místo stavu fronty ukazuje `T--` a první synchronizace se zaznamená událostí `ClockSynchronized`. Backend navíc odmítá vzorky s časem před rokem 2025 nebo více než 5 minut v budoucnosti (viz kap. 14.6).
+
+NTP odpověď se čte s rozlišením celých sekund. Chyba synchronizace je proto řádově do 1 s, což je při 10s vzorkování zanedbatelné.
+
+Displej převádí UTC na středoevropský čas podle pravidla EU: letní čas (UTC+2) platí od poslední neděle v březnu 01:00 UTC do poslední neděle v říjnu 01:00 UTC, jinak UTC+1. Backend a PostgreSQL pracují s UTC a pro zobrazení mohou používat časovou zónu `Europe/Prague`.
 
 ## 11. Měřicí cyklus
 
 ### 11.1 Vzorkování
 
-Hlavní smyčka provede jedno čtení všech senzorů podle `SamplePeriodSeconds`. Ve výchozím nastavení jde o jeden vzorek za sekundu.
+Hlavní smyčka provede jedno čtení všech senzorů každých 10 sekund. Stejný desetisekundový takt se používá pro vytvoření a odeslání surového vzorku. Vzorek se nevytváří, dokud není čas synchronizován z NTP (kap. 10), a jeden vzorek se vynechá při přepnutí zdroje napájení (stabilizace).
 
 Při desetiminutovém intervalu je očekávaný počet vzorků:
 
 ```text
-10 minut * 60 sekund / 1 sekunda = 600 vzorků
+10 minut * 60 sekund / 10 sekund = 60 vzorků
 ```
 
 ### 11.2 Zarovnání intervalů
@@ -411,22 +433,26 @@ Intervaly jsou zarovnány podle UTC času. Při desetiminutové konfiguraci se u
 14:00, 14:10, 14:20, 14:30, ...
 ```
 
-Pokud mají všechny stanice synchronizovaný čas, vytvoří záznam pro stejnou časovou hranici. Odeslání může proběhnout s mírným různým zpožděním, ale `MeasuredAt` zůstává stejný.
+Pokud mají všechny stanice synchronizovaný čas, jejich vzorky spadají do stejných časových oken. Odeslání může proběhnout s různým zpožděním, ale `MeasuredAt` jednotlivých vzorků zůstává zachován.
+
+Backend používá polouzavřené intervaly `[začátek, konec)`. Vzorek přesně na koncové hranici patří do následujícího intervalu. Příchod prvního vzorku nového okna zároveň vyvolá sestavení předchozího uzavřeného agregátu.
 
 ### 11.3 Agregace
 
-Firmware během otevřeného intervalu udržuje průběžné součty, počty a statistiky. Po uzavření vytvoří jeden `NanoMeasurementRecord`.
+Firmware agregaci neprovádí. Tabulka `SensorSamples` je zdrojem pravdy a backend z ní po uzavření desetiminutového okna vytvoří nebo přepočítá jeden záznam `Measurement`.
 
 Pro hlavní veličiny se ukládá:
 
 - aritmetický průměr,
 - minimum,
 - maximum,
-- směrodatná odchylka,
+- výběrová směrodatná odchylka (dělení `n − 1`, pro jediný vzorek 0),
 - počet úspěšných čtení,
 - počet chyb nebo čekání.
 
-Průběžný výpočet směrodatné odchylky zabraňuje nutnosti uchovávat všech 600 surových vzorků v omezené paměti ESP32.
+Minimum, maximum a směrodatná odchylka se ukládají pro teplotu, vlhkost, tlak, PM2,5 a PM10. Pro PM1, PM4, početní koncentrace a typickou velikost částic se ukládá jen průměr. Pro analýzu robustními metodami (medián, MAD) je zdrojem tabulka `SensorSamples`.
+
+Pokud později dorazí starší vzorek z perzistentní flash fronty, backend příslušný již existující interval znovu přepočítá. ESP32 proto nemusí držet statistické akumulátory ani samostatnou frontu agregovaných měření.
 
 ### 11.4 Stav měřicího intervalu
 
@@ -442,53 +468,78 @@ Průběžný výpočet směrodatné odchylky zabraňuje nutnosti uchovávat vše
 | 5 | `BackupPowerActive` | Interval proběhl na baterii |
 | 6 | `Sps30DisabledOnBattery` | SPS30 byl na baterii vypnut |
 
-nanoFramework může při volání `Enum.ToString()` odeslat číselnou podobu, a proto může databáze obsahovat například řetězce `"1"` nebo `"5"`.
+nanoFramework může při volání `Enum.ToString()` odeslat číselnou podobu. API proto stavy normalizuje na jména podle `FirmwareStatusCatalog`; starší záznamy mohou obsahovat řetězce `"1"` nebo `"5"`.
 
-Aktuálně se jako hlavní stav uchovává první nenulový stav intervalu. Detailnější diagnostika zůstává dostupná v samostatných počtech úspěchů, chyb a čekání.
+Backend určí jediný stav intervalu podle priority:
+
+1. alespoň jedno chybné čtení SHT40 → `Sht40ReadFailed`,
+2. BMP280 → `Bmp280ReadFailed`,
+3. SPS30 (chyby kromě `WAIT` a vypnutí na baterii) → `Sps30ReadFailed`,
+4. vynechané čtení SPS30 kvůli baterii → `Sps30DisabledOnBattery`,
+5. alespoň jeden vzorek na baterii → `BackupPowerActive`,
+6. méně než 50 % očekávaných vzorků (méně než 30 z 60) → `InsufficientSamples`,
+7. jinak `Ok`.
+
+Detailnější diagnostika zůstává dostupná v samostatných počtech úspěchů, chyb a čekání. Práh 50 % pro stav intervalu je záměrně mírnější než práh 80 % kontroly kvality `LowCompleteness` (kap. 16.2).
 
 ## 12. Lokální fronty a upload worker
 
-Firmware používá dvě RAM fronty:
+Firmware používá krátký RAM staging pro surové vzorky a dvě samostatné perzistentní kruhové fronty ve flash:
 
 | Fronta | Kapacita | Obsah |
 |---|---:|---|
-| Měření | 64 | Uzavřené intervalové záznamy |
-| Události | 16 | Diagnostické a provozní události |
+| Události ve flash | 16 | Diagnostické a provozní události, zachované po restartu |
+| Surové vzorky v RAM | 60 | Neúplný blok aktuálních 10sekundových vzorků |
+| Surové vzorky ve flash | 4320 | Přibližně 12 hodin při intervalu 10 sekund |
 
-Samostatné vlákno `NanoUploadWorker` odděluje síťové operace od hlavní měřicí smyčky. Díky tomu pomalá odpověď API nemá přímo zastavit čtení senzorů.
+Záznam vzorku ve flash má od firmwaru 0.4.0 pevnou délku 96 B (formát verze 2). Měřené hodnoty se ukládají jako 32bitová čísla s plovoucí čárkou, protože senzory vyšší přesnost nedodávají. Plná fronta tak zabere asi 415 kB. Soubor s jinou verzí formátu se při startu založí znovu. **Před nahráním nového firmwaru je proto vhodné nechat frontu vyprázdnit** (na displeji `Q00`). Kapacitu interního souborového systému je potřeba ověřit dlouhodobým testem bez sítě (kap. 25).
+
+Samostatné vlákno `NanoUploadWorker` odděluje síťové operace od hlavní měřicí smyčky. Díky tomu pomalá odpověď API ani obnova Wi-Fi nezastaví čtení senzorů.
 
 Chování workeru:
 
+- nejprve nechá `NanoWifiSupervisor` ověřit a případně obnovit Wi-Fi; bez spojení se upload nezkouší,
 - při prázdných frontách čeká 1 sekundu,
-- přednostně odesílá měření,
-- pokud není měření odesláno, pokusí se o událost,
+- zpracuje události a surové vzorky,
+- po šesti vzorcích přesune celý minutový blok z RAM do flash,
+- při chybě uploadu uloží do flash okamžitě také neúplný blok,
+- u surových vzorků odesílá záznamy z flash v pořadí od nejstaršího,
+- událost zapisuje do flash ihned při jejím vzniku,
 - po úspěchu čeká 5 sekund,
 - po neúspěchu čeká 60 sekund,
 - samotný HTTP klient má navíc 30sekundový backoff,
-- záznam se z fronty odstraní až po HTTP odpovědi 2xx.
+- záznam se z fronty odstraní po HTTP odpovědi 2xx,
+- záznam trvale odmítnutý serverem (HTTP 400, 413 nebo 422) se z fronty také odstraní, jinak by zablokoval všechny další záznamy; firmware počet odmítnutých vzorků vypisuje do ladicího výstupu,
+- ostatní chyby (síť, 401, 404, 409, 5xx) vedou k opakování.
 
-HTTP stav `201` znamená vytvoření nového záznamu. Stav `200` znamená, že API nalezlo již existující záznam a vrátilo jej jako idempotentní opakování.
+Endpoint `/api/samples` vrací vždy HTTP 200 se souhrnem (`storedCount`, `duplicateCount`, `rejectedCount`), endpoint událostí vrací 201 pro novou a 200 pro již uloženou událost. Hodnoty NaN a nekonečno firmware odesílá jako `null`, protože by jinak vznikl neplatný JSON a odmítnutí celé dávky.
 
-Fronty jsou pouze v RAM. Restart zařízení jejich obsah smaže. Tato vlastnost je důležitým současným omezením.
+Surové vzorky se zapisují do flash po blocích šesti záznamů. Tím je omezen počet aktualizací hlavičky fronty a při náhlém výpadku napájení je ohrožen pouze aktuální neúplný blok, tedy nejvýše přibližně jedna minuta dat. Po neúspěšném HTTP pokusu se uloží i tento neúplný blok. Po restartu se obě flash fronty obnoví a odešlou. Záznam se odstraní pouze po HTTP odpovědi 2xx.
 
-## 13. Přenosový formát měření
+Události mají samostatný soubor `I:\meteo.events.queue`. Každá událost se ukládá okamžitě a nese stabilní `EventGuid`. Při potvrzení API firmware ověří, že z čela fronty odstraňuje právě potvrzený GUID. Surové vzorky používají soubor `I:\meteo.samples.queue`. Po zaplnění kruhové fronty se přepíše nejstarší záznam a zvýší se počitadlo zahozených položek.
+
+## 13. Přenosový formát vzorků
 
 Firmware posílá JSON metodou `POST` na:
 
 ```text
-/api/measurements
+/api/samples
 ```
 
 Součástí requestu jsou:
 
+- verze komunikačního protokolu,
 - identita stanice,
 - verze firmwaru,
-- stabilní číselný identifikátor intervalu ve formátu UTC `yyyyMMddHHmmss`,
-- čas intervalu,
-- průměrné senzorové hodnoty,
-- počty úspěšných a chybných čtení,
-- minima, maxima a směrodatné odchylky,
-- stav intervalu.
+- stabilní číselný identifikátor vzorku ve formátu UTC `yyyyMMddHHmmss`,
+- přesný čas vzorku,
+- textové umístění stanice (`locationText`, od protokolu 2),
+- aktuální hodnoty SHT40, BMP280 a SPS30 včetně početních koncentrací (od protokolu 2), zaokrouhlené na tři desetinná místa,
+- stav každého senzoru,
+- napětí a stav baterie,
+- zdroj napájení a celkový stav vzorku.
+
+Aktuální firmware `0.4.0` používá protokol verze `2`, který proti verzi `1` (firmware 0.3.x) přidává početní koncentrace SPS30 a `locationText`. Hodnota `0` označuje starší firmware, který pole `protocolVersion` ještě neposílal. Backend přijímá verze `0` až `2`; vyšší neznámou verzi odmítne, aby neuložil nesprávně interpretovaný payload. U vzorků protokolu `1` zůstávají početní koncentrace `NULL`.
 
 API klíč se posílá v hlavičce:
 
@@ -511,7 +562,7 @@ X-Api-Key: <hodnota>
 
 Při startu API:
 
-1. načte connection string `MeteoDatabase`,
+1. načte konfiguraci (`appsettings.json`, `appsettings.{Environment}.json`, neverzovaný `appsettings.Local.json` a proměnné prostředí s nejvyšší prioritou) a connection string `MeteoDatabase`,
 2. nastaví PostgreSQL provider a assembly s migracemi,
 3. zjistí aplikované a čekající migrace,
 4. zavolá `Database.Migrate()`,
@@ -524,44 +575,70 @@ Databáze jako taková musí v PostgreSQL existovat. API automaticky vytváří 
 | Metoda | Cesta | Účel | API klíč |
 |---|---|---|---|
 | GET | `/api` | Kontrola běhu API | ne |
-| POST | `/api/measurements` | Uložení měření | ano, pokud je nakonfigurován |
-| GET | `/api/measurements/{stationGuid}/recent?take=100` | Poslední měření stanice | ne |
+| GET | `/api/metadata/statuses` | Verze protokolu a katalog stavových kódů | ne |
+| GET | `/api/measurements/{stationGuid}/recent?take=100` | Poslední desetiminutové agregáty stanice | ne |
 | POST | `/api/events` | Uložení události | ano, pokud je nakonfigurován |
 | GET | `/api/events/{stationGuid}/recent?take=100` | Poslední události stanice | ne |
+| POST | `/api/samples` | Dávkové uložení desetisekundových vzorků | ano, pokud je nakonfigurován |
+| GET | `/api/samples` | Stránkovaný seznam surových vzorků | ne |
+| GET | `/api/samples/latest` | Poslední vzorek každé stanice | ne |
+| GET | `/api/samples/export.csv` | Export vzorků pro analýzu | ne |
+| GET | `/api/stations` | Seznam stanic včetně verze firmwaru a SPS30 korekce | ne |
+| PUT | `/api/stations/{stationGuid}/sps30-correction` | Nastavení procentní korekce SPS30 stanice | administrátorský klíč `X-Admin-Key` (povinný) |
 | SignalR | `/hubs/meteo` | Živé oznámení o novém měření | podle současné CORS konfigurace |
 | Swagger | `/swagger` | Dokumentace a testování API | ne |
 
 Parametr `take` je omezen na rozsah 1 až 1000.
 
+Dřívější endpoint `POST /api/measurements` pro příjem agregátů ze starého firmwaru byl odstraněn. Agregáty počítá výhradně backend ze surových vzorků, takže by se dva zdroje téhož intervalu přepisovaly.
+
 ### 14.4 API klíč
 
 Pokud `StationApi:ApiKey` není nastaven, upload endpointy přijímají request bez klíče. Pokud nastaven je, musí se přesně shodovat hlavička `X-Api-Key`. Při neshodě API vrátí HTTP 401.
 
+Administrativní endpointy (korekce SPS30) chrání samostatný klíč `AdminApi:ApiKey` v hlavičce `X-Admin-Key`. Klíč stanice je totiž uložen čitelně v každé stanici a neměl by umožnit měnit korekce. Bez nastaveného administrátorského klíče jsou tyto endpointy zakázány (HTTP 403).
+
 ### 14.5 Registrace stanice
 
-Registrace není samostatný endpoint. Proběhne automaticky při prvním uploadu měření nebo události. API vytvoří `Station`, přiřadí jí GUID a čitelný kód a odpověď vrátí firmwaru.
+Registrace není samostatný endpoint. Proběhne automaticky při prvním uploadu raw vzorku nebo události. Obě cesty používají stejnou službu `StationRegistrationService`, která vytvoří `Station`, přiřadí jí interní GUID a čitelný kód a odpověď vrátí firmwaru. Při každém uploadu služba aktualizuje verzi firmwaru, verzi protokolu a neprázdné `LocationText`.
 
 ### 14.6 Deduplikace
 
-Současná implementace považuje záznam za duplicitní podle kombinace:
+Měření se považuje za duplicitní podle kombinace:
 
 ```text
 StationId + SequenceNumber
 ```
 
-Stejná kombinace má v databázi unikátní index. Tento mechanismus brání dvojímu uložení při opakování stejného HTTP requestu.
+Stejná kombinace má v databázi unikátní index. Události používají samostatnou stabilní identitu:
 
-`SequenceNumber` měření již není čítač v RAM. Firmware jej odvozuje z UTC konce intervalu ve formátu `yyyyMMddHHmmss`. Interval ukončený například `2026-10-24 11:30:00 UTC` má hodnotu `20261024113000`. Po restartu proto stejný interval dostane stejné číslo a nový časový interval jiné číslo. Různé stanice mohou mít stejné číslo, protože unikátnost se vyhodnocuje společně s `StationId`.
+```text
+StationId + EventGuid
+```
+
+Firmware vytvoří `EventGuid` pouze jednou při vzniku události. Opakovaný HTTP request nese stejný GUID, takže API bezpečně vrátí existující událost i po restartu stanice. `SequenceNumber` události slouží už jen jako diagnostické pořadí.
+
+`SequenceNumber` agregátu není čítač. Backend jej odvozuje z UTC konce intervalu ve formátu `yyyyMMddHHmmss`; `SequenceNumber` surového vzorku stejně odvozuje firmware z času vzorku. Interval ukončený například `2026-10-24 11:30:00 UTC` má hodnotu `20261024113000`. Po restartu proto stejný interval dostane stejné číslo a nový časový interval jiné číslo. Různé stanice mohou mít stejné číslo, protože unikátnost se vyhodnocuje společně s `StationId`.
+
+`HardwareId` má filtrovaný unikátní index pro neprázdné hodnoty. Současná registrace stejné fyzické desky proto nemůže vytvořit dvě stanice; API při konfliktu znovu načte již existující záznam.
+
+Vzorky s nevěrohodným časem (před 1. 1. 2025 nebo více než 5 minut v budoucnosti vůči serveru) API neuloží, započítá je do `rejectedCount` a dávku potvrdí HTTP 200. Stanice je tak z fronty odstraní. U události s nevěrohodným `OccurredAt` se místo něj uloží čas přijetí. Pokud dvě souběžné dávky uloží stejné vzorky, druhá dostane HTTP 409 a stanice ji zopakuje; při opakování už jsou vzorky duplicitní.
 
 ### 14.7 SignalR
 
-Po vytvoření nového měření API vyšle všem klientům metodu:
+Po vytvoření nového agregátu nebo po jeho přepočtu kvůli nově doručeným vzorkům API vyšle všem klientům metodu:
 
 ```text
 measurementReceived
 ```
 
-Tato část je připravena pro budoucí živý dashboard. Duplicitní měření, které vrací HTTP 200, novou SignalR zprávu nevytváří.
+Tato část je připravena pro budoucí živý dashboard. Přepočet bez nových vzorků (duplicitní upload, periodický worker) novou SignalR zprávu nevytváří.
+
+### 14.8 Backendová agregace a souběh
+
+Příjem nového vzorku i periodický worker mohou požadovat přepočet stejného desetiminutového intervalu. Přepočet proto běží v databázové transakci chráněné PostgreSQL advisory zámkem `pg_advisory_xact_lock`. V jednu chvíli mění agregaci a její příznaky kvality pouze jeden proces. SignalR oznámení se odesílá až po potvrzení transakce.
+
+Pozdě doručený vzorek z flash fronty znovu sestaví příslušný interval i oba sousední intervaly, protože kontrola skoku porovnává sousední intervaly. Primárním zdrojem pro přepočet je vždy tabulka `SensorSamples`, nikoliv předchozí hodnota agregátu. Periodický worker uzavírá předchozí interval 15 s po hranici desetiminutového okna i u stanice, která přestala vysílat.
 
 ## 15. Databázový model
 
@@ -570,6 +647,7 @@ Tato část je připravena pro budoucí živý dashboard. Duplicitní měření,
 ```mermaid
 erDiagram
     Stations ||--o{ Measurements : produces
+    Stations ||--o{ SensorSamples : produces
     Stations ||--o{ DeviceEvents : reports
     Stations ||--o| StationSettings : has
     Measurements ||--o{ MeasurementQualityFlags : receives
@@ -589,9 +667,11 @@ Eviduje jednu fyzickou meteostanici.
 | `StationGuid` | `uuid` | ano | Trvalý GUID vytvořený firmwarem |
 | `StationCode` | `varchar(64)` | ano | Čitelný unikátní kód, např. `meteostanice-001` |
 | `Name` | `varchar(160)` | ano | Zobrazovaný název |
-| `LocationText` | `varchar(200)` | ano | Textové umístění stanice |
+| `LocationText` | `varchar(200)` | ano | Textové umístění stanice z konfigurace firmwaru (od protokolu 2) |
 | `HardwareId` | `varchar(120)` | ano | Identita fyzické desky |
 | `FirmwareVersion` | `varchar(40)` | ano | Naposledy oznámená verze firmwaru |
+| `ProtocolVersion` | `integer` | ano | Naposledy oznámená verze JSON protokolu; `0` znamená starší firmware |
+| `Sps30CorrectionPercent` | `double precision` | ano | Podepsaná procentní korekce hmotnostních koncentrací SPS30; výchozí hodnota `0` |
 | `CreatedAt` | `timestamptz` | ano | Čas registrace v backendu |
 | `LastSeenAt` | `timestamptz` | ne | Čas posledního nově uloženého měření nebo události |
 | `IsActive` | `boolean` | ano | Administrativní aktivita stanice |
@@ -599,13 +679,14 @@ Eviduje jednu fyzickou meteostanici.
 Indexy:
 
 - unikátní `StationGuid`,
-- unikátní `StationCode`.
+- unikátní `StationCode`,
+- filtrovaný unikátní `HardwareId`, pokud není prázdný.
 
-`LastSeenAt` neudává čas měření. Udává čas posledního nového záznamu, který API od stanice úspěšně uložilo. Nejde o samostatný heartbeat a duplicitní požadavek tuto hodnotu neaktualizuje. Pro odvození stavu online/offline ji proto lze použít pouze orientačně.
+`LastSeenAt` neudává čas měření. Udává čas posledního nového vzorku nebo události, které API od stanice úspěšně uložilo. Nejde o samostatný heartbeat a dávka obsahující jen duplicity tuto hodnotu neaktualizuje. Pro odvození stavu online/offline ji proto lze použít pouze orientačně.
 
 ### 15.3 Tabulka `Measurements`
 
-Obsahuje jeden agregovaný záznam za uzavřený interval jedné stanice.
+Obsahuje jeden backendem vypočtený agregovaný záznam za uzavřený desetiminutový interval jedné stanice. Záznam se přepočítá také při pozdním doručení surových vzorků.
 
 #### Identita a čas
 
@@ -630,11 +711,11 @@ Rozdíl `CreatedAt - MeasuredAt` vyjadřuje zpoždění uploadu.
 | `Pm25` | `double precision`, nullable | µg/m³ | Průměrná PM2.5 |
 | `Pm4` | `double precision`, nullable | µg/m³ | Průměrná PM4.0 |
 | `Pm10` | `double precision`, nullable | µg/m³ | Průměrná PM10 |
-| `NumberPm05` | `double precision`, nullable | početní koncentrace | Částice nad 0,5 um |
-| `NumberPm1` | `double precision`, nullable | početní koncentrace | Částice nad 1,0 um |
-| `NumberPm25` | `double precision`, nullable | početní koncentrace | Částice nad 2,5 um |
-| `NumberPm4` | `double precision`, nullable | početní koncentrace | Částice nad 4,0 um |
-| `NumberPm10` | `double precision`, nullable | početní koncentrace | Částice nad 10 um |
+| `NumberPm05` | `double precision`, nullable | #/cm³ | Průměrná početní koncentrace částic 0,3–0,5 µm (SPS30 „PM0.5“) |
+| `NumberPm1` | `double precision`, nullable | #/cm³ | Průměrná početní koncentrace částic 0,3–1,0 µm |
+| `NumberPm25` | `double precision`, nullable | #/cm³ | Průměrná početní koncentrace částic 0,3–2,5 µm |
+| `NumberPm4` | `double precision`, nullable | #/cm³ | Průměrná početní koncentrace částic 0,3–4,0 µm |
+| `NumberPm10` | `double precision`, nullable | #/cm³ | Průměrná početní koncentrace částic 0,3–10 µm |
 | `TypicalParticleSize` | `double precision`, nullable | µm | Typická velikost částic |
 
 #### Napájení
@@ -644,7 +725,7 @@ Rozdíl `CreatedAt - MeasuredAt` vyjadřuje zpoždění uploadu.
 | `BatteryVoltage` | `double precision`, nullable | Napětí baterie |
 | `PowerSource` | `varchar(16)` | Zdroj, například `BAT` nebo `SRC` |
 
-Tyto sloupce v databázovém modelu existují, ale aktuální `NanoMeasurementRecord` je zatím neposílá v JSON payloadu. Napájení se nyní zobrazuje na displeji a ovlivňuje chování SPS30, ale databázové hodnoty nejsou firmwarem plně naplněny.
+Tyto hodnoty backend agreguje z desetisekundových vzorků. `BatteryVoltage` je průměr dostupných hodnot a `PowerSource` je `BAT`, pokud alespoň jeden vzorek intervalu hlásí provoz na baterii, jinak `SRC`.
 
 #### Úplnost vzorkování
 
@@ -677,22 +758,56 @@ Všechny jsou typu `double precision` a mohou být `NULL` na úrovni databáze.
 
 | Sloupec | Typ | Význam |
 |---|---|---|
-| `Status` | `varchar(64)` | Stav uzavřeného intervalu z firmwaru |
+| `Status` | `varchar(64)` | Stav uzavřeného intervalu vypočtený backendem |
 
 Indexy:
 
 - unikátní `(StationId, SequenceNumber)`,
 - neunikátní `(StationId, MeasuredAt)` pro rychlé časové dotazy.
 
-### 15.4 Tabulka `DeviceEvents`
+Sloupce `NumberPm05` až `NumberPm10` backend plní průměrem z `SensorSamples`. U intervalů, jejichž vzorky odeslal firmware s protokolem 1, zůstávají `NULL`.
+
+### 15.4 Tabulka `SensorSamples`
+
+Je zdrojem pravdy pro analýzu a opakovatelnou backendovou agregaci. Jeden řádek představuje jedno čtení stanice v desetisekundové hranici.
+
+| Sloupec | Typ | Význam |
+|---|---|---|
+| `Id` | `uuid` | Primární klíč vzorku vytvořený backendem |
+| `StationId` | `uuid` | Cizí klíč do `Stations.Id` |
+| `SequenceNumber` | `bigint` | UTC čas vzorku zakódovaný jako `yyyyMMddHHmmss` |
+| `MeasuredAt` | `timestamptz` | Čas měření na stanici |
+| `CreatedAt` | `timestamptz` | Čas přijetí backendem |
+| `TemperatureCelsius` | `double precision`, nullable | Teplota SHT40 v °C |
+| `HumidityPercent` | `double precision`, nullable | Relativní vlhkost v % RH |
+| `PressureHpa` | `double precision`, nullable | Absolutní tlak BMP280 v hPa |
+| `Bmp280TemperatureCelsius` | `double precision`, nullable | Pomocná teplota BMP280 v °C |
+| `Pm1` | `double precision`, nullable | Raw PM1 v µg/m³ |
+| `Pm25` | `double precision`, nullable | Raw PM2,5 v µg/m³ |
+| `Pm4` | `double precision`, nullable | Raw PM4 v µg/m³ |
+| `Pm10` | `double precision`, nullable | Raw PM10 v µg/m³ |
+| `NumberPm05` … `NumberPm10` | `double precision`, nullable | Raw početní koncentrace SPS30 v #/cm³ (5 sloupců, od protokolu 2) |
+| `TypicalParticleSize` | `double precision`, nullable | Typická velikost částic v µm |
+| `BatteryVoltage` | `double precision`, nullable | Napětí baterie |
+| `BatteryLow` | `boolean` | Příznak nízkého napětí |
+| `PowerSource` | `varchar(16)` | Zdroj `SRC` nebo `BAT` |
+| `Sht40Status` | `varchar(32)` | Stav jednoho čtení SHT40 |
+| `Bmp280Status` | `varchar(32)` | Stav jednoho čtení BMP280 |
+| `Sps30Status` | `varchar(32)` | Stav jednoho čtení SPS30 |
+| `Status` | `varchar(64)` | Souhrnný stav raw vzorku |
+
+Unikátní index `(StationId, SequenceNumber)` zajišťuje idempotenci opakovaného uploadu. Indexy `(StationId, MeasuredAt)` a `MeasuredAt` podporují agregaci, časové dotazy a CSV export.
+
+### 15.5 Tabulka `DeviceEvents`
 
 Obsahuje provozní a diagnostické události zařízení.
 
 | Sloupec | Typ | Význam |
 |---|---|---|
 | `Id` | `uuid` | Primární klíč události |
+| `EventGuid` | `uuid` | Stabilní identita vytvořená firmwarem pro idempotentní upload |
 | `StationId` | `uuid` | Stanice, která událost vytvořila |
-| `SequenceNumber` | `integer` | Lokální pořadí události |
+| `SequenceNumber` | `integer` | Lokální diagnostické pořadí události; není její identitou |
 | `OccurredAt` | `timestamptz` | Čas vzniku na stanici |
 | `Severity` | `varchar(32)` | Závažnost |
 | `Category` | `varchar(64)` | Oblast systému |
@@ -702,7 +817,7 @@ Obsahuje provozní a diagnostické události zařízení.
 | `CreatedAt` | `timestamptz` | Čas uložení backendem |
 | `ResolvedAt` | `timestamptz`, nullable | Čas vyřešení; zatím se aktivně nepoužívá |
 
-Unikátní index je `(StationId, SequenceNumber)`.
+Unikátní index je `(StationId, EventGuid)`. `EventGuid` vznikne jednou při vytvoření události a při opakovaném uploadu se nemění. Restart stanice proto nezpůsobí kolizi s dřívější událostí. Na `(StationId, SequenceNumber)` zůstává pouze neunikátní index pro diagnostické řazení a kompatibilitu se starším firmwarem.
 
 Závažnosti:
 
@@ -722,9 +837,22 @@ Kategorie:
 - `Configuration`,
 - `System`.
 
-Události pokrývají například start zařízení, výpadek napájení, nízkou baterii, chyby senzorů, Wi-Fi, serveru, času, fronty a konfigurace.
+Firmware 0.4.0 skutečně vytváří tyto události:
 
-### 15.5 Tabulka `StationSettings`
+| Oblast | Kódy | Kdy vznikají |
+|---|---|---|
+| Systém | `DeviceStarted` | start firmwaru (čas může být ještě nesynchronizovaný, backend jej pak nahradí časem přijetí) |
+| Čas | `ClockSynchronized` | první úspěšná NTP synchronizace po startu |
+| Napájení | `MainsPowerLost`, `MainsPowerRestored`, `BatteryLow` | změna zdroje a nízké napětí |
+| SPS30 a napájení | `Sps30DisabledOnBattery`, `Sps30Restored` | zastavení a obnovení SPS30 při přechodu na baterii a zpět |
+| Senzory | `Sht40NotDetected`, `Sht40ReadFailed`, `Sht40CrcFailed`, `Sht40Recovered`, `Bmp280NotDetected`, `Bmp280ReadFailed`, `Bmp280Recovered`, `Sps30NotDetected`, `Sps30ReadFailed`, `Sps30FanError`, `Sps30LaserError`, `Sps30Restored` | porucha po třech po sobě jdoucích chybných čteních (30 s), zotavení po prvním úspěšném čtení; `WAIT` u SPS30 se nepočítá |
+| Síť | `WifiConnectionFailed`, `WifiConnected`, `ServerUnavailable`, `ServerConnectionRestored` | ztráta a obnova Wi-Fi, kontrola serveru při startu a po setupu |
+
+Kódy `DeviceRestarted`, `BrownoutDetected`, `AuthenticationFailed`, `ClockSynchronizationFailed`, `LocalQueueNearFull`, `LocalQueueFull`, `LocalRecordCorrupted`, `ConfigurationInvalid` a `ConfigurationApplied` jsou v číselníku rezervované, ale firmware je zatím nevytváří.
+
+Fronta událostí má jen 16 míst. Při dlouhém výpadku sítě s mnoha událostmi se nejstarší přepisují.
+
+### 15.6 Tabulka `StationSettings`
 
 Je připravena pro centrálně řízená nastavení stanice.
 
@@ -740,7 +868,7 @@ Je připravena pro centrálně řízená nastavení stanice.
 
 Na `StationId` je unikátní index, takže stanice může mít právě jeden aktuální konfigurační záznam. Firmware nyní nastavení z backendu nestahuje; tabulka je připravena pro budoucí synchronizaci.
 
-### 15.6 Tabulka `SensorChannels`
+### 15.7 Tabulka `SensorChannels`
 
 Číselník měřených nebo diagnostických kanálů.
 
@@ -751,9 +879,9 @@ Na `StationId` je unikátní index, takže stanice může mít právě jeden akt
 | `Name` | `varchar(120)` | Čitelný název |
 | `Unit` | `varchar(24)` | Jednotka |
 
-`Code` je unikátní. Při prvním výskytu příznaku kvality API kanál automaticky vytvoří. Aktuálně se `Name` inicializuje stejnou hodnotou jako `Code` a `Unit` zůstává prázdná.
+`Code` je unikátní. Při prvním výskytu příznaku kvality API kanál automaticky vytvoří a vyplní český název a jednotku z `QualityCatalog`. Kanály vytvořené starší verzí API mají `Name` rovné `Code` a prázdnou jednotku.
 
-### 15.7 Tabulka `QualityChecks`
+### 15.8 Tabulka `QualityChecks`
 
 Číselník typů kontrol kvality.
 
@@ -766,9 +894,9 @@ Na `StationId` je unikátní index, takže stanice může mít právě jeden akt
 | `DefaultSeverity` | `varchar(32)` | Výchozí závažnost |
 | `Enabled` | `boolean` | Aktivita definice |
 
-`Code` je unikátní. API definici vytváří automaticky při prvním výskytu, ale aktuální vyhodnocovací služba zatím před výpočtem nečte příznak `Enabled`.
+`Code` je unikátní. API definici vytváří automaticky při prvním výskytu (s popisem z `QualityCatalog`). Nastavením `Enabled = false` lze kontrolu vypnout: příznak se pak při dalším přepočtu intervalu neuloží.
 
-### 15.8 Tabulka `MeasurementQualityFlags`
+### 15.9 Tabulka `MeasurementQualityFlags`
 
 Obsahuje konkrétní zjištěný problém jednoho měření.
 
@@ -782,13 +910,40 @@ Obsahuje konkrétní zjištěný problém jednoho měření.
 | `Message` | `varchar(500)` | Vysvětlení |
 | `CreatedAt` | `timestamptz` | Čas vytvoření příznaku |
 
-### 15.9 Tabulka `__EFMigrationsHistory`
+Kombinace `(MeasurementId, SensorChannelId, QualityCheckId)` je unikátní. Jeden přepočet proto nemůže uložit tentýž typ problému pro stejný kanál dvakrát.
+
+### 15.10 Tabulka `__EFMigrationsHistory`
 
 Technická tabulka Entity Framework Core. Uchovává seznam aplikovaných migrací a neslouží k měřeným datům.
 
+### 15.11 Revize datového modelu
+
+Datový model záměrně odděluje raw vzorky, odvozené desetiminutové agregáty, události a příznaky kvality. Pro diplomovou práci jsou potřebné zejména `SensorSamples`, `Measurements`, `Stations`, `DeviceEvents` a tabulky kvality.
+
+`SequenceNumber` není náhradou primárního GUID. Slouží jako zařízeními vytvářený idempotentní klíč společně se `StationId`, zatímco `Id` je databázová identita řádku. Obě hodnoty proto mají samostatný účel.
+
+Revize modelu v listopadu 2026 (firmware 0.4.0):
+
+- `SensorSamples` dostaly sloupce početních koncentrací SPS30 (migrace `AddSampleNumberConcentrations`) a `Measurements.Number*` se znovu plní průměry,
+- `Stations.LocationText` se plní z konfigurace stanice,
+- `SensorChannels.Name`/`Unit` a `QualityChecks.Description` se vyplňují z `QualityCatalog`, `QualityChecks.Enabled` se respektuje,
+- přenosový objekt `MeasurementUploadRequest` a endpoint pro příjem agregátů ze stanice byly odstraněny, protože agregáty vznikají jen na backendu,
+- `MeasurementDto` nově obsahuje `BatteryVoltage`.
+
+Následující části jsou připravené pro budoucí funkce a zatím se nepoužívají:
+
+- `StationSettings` (centrálně řízená konfigurace stanice); `MeasurementIntervalMinutes` čte Monitor jako délku intervalu pro vyhodnocení výpadku, `SamplePeriodSeconds` se nepoužívá, protože firmware vzorkuje pevně po 10 s,
+- `LocationText` existuje ve `Stations` i `StationSettings`; autoritativní je hodnota stanice, druhá je rezervovaná pro budoucí verzovanou konfiguraci,
+- `DeviceEvents.ResolvedAt` (budoucí ruční nebo automatické uzavírání poruch),
+- textové stavové sloupce jsou méně úsporné než číselné kódy, ale zůstávají kvůli čitelnosti exportů a kompatibilitě mezi firmwarem, API a monitorem.
+
+Sloupce se nemažou, protože odstranění by bylo destruktivní a pro tři lokální stanice by nepřineslo významnou úsporu.
+
 ## 16. Kontrola kvality dat
 
-Kontrola probíhá po uložení nového měření. API načte poslední předchozí měření stejné stanice a zavolá `MeasurementQualityService`.
+Kontrola probíhá při každém sestavení nebo přepočtu desetiminutového agregátu. API předá `MeasurementQualityService` agregát a agregát **bezprostředně předcházejícího** intervalu stejné stanice. Pokud předchozí interval chybí (výpadek), kontroly proti předchozímu intervalu se neprovádějí.
+
+Prahy v této kapitole jsou inženýrské výchozí hodnoty první verze, nikoli ověřené detekční limity. V diplomové práci je potřeba je zdůvodnit (dokumentace senzorů, fyzikální meze) nebo nastavit pomocí analýzy citlivosti nad naměřenými daty.
 
 ### 16.1 Kontrola rozsahu
 
@@ -797,14 +952,13 @@ Kontrola probíhá po uložení nového měření. API načte poslední předcho
 | Teplota | -40 až 70 °C |
 | Vlhkost | 0 až 100 % |
 | Tlak | 850 až 1100 hPa |
-| PM1 | 0 až 500 |
-| PM2.5 | 0 až 500 |
-| PM4 | 0 až 600 |
-| PM10 | 0 až 700 |
-| Početní koncentrace | 0 až 100000 |
-| Typická velikost částic | 0 až 20 |
+| PM1 | 0 až 500 µg/m³ |
+| PM2.5 | 0 až 500 µg/m³ |
+| PM4 | 0 až 600 µg/m³ |
+| PM10 | 0 až 700 µg/m³ |
+| Typická velikost částic | 0 až 20 µm |
 
-Chybějící nullable hodnota vytváří příznak `MissingValue`. Hodnota mimo rozsah vytváří `OutOfRange`.
+Chybějící průměr vytváří příznak `MissingValue`. `OutOfRange` vzniká, když je mimo rozsah průměr, **nebo minimum či maximum intervalu**. Minimum a maximum se ukládá pro teplotu, vlhkost, tlak, PM2,5 a PM10, takže jediný chybný vzorek se u těchto veličin průměrováním neskryje. U PM1, PM4 a typické velikosti částic se kontroluje jen průměr. Při provozu na baterii, kdy je SPS30 zastaven a nemá žádné platné čtení, se kontroly PM přeskakují (interval nese `BatteryContext`). Početní koncentrace se zatím na rozsah nekontrolují.
 
 ### 16.2 Úplnost
 
@@ -814,7 +968,7 @@ SPS30 se na úplnost nekontroluje, pokud `PowerSource` obsahuje `BAT`.
 
 ### 16.3 Flatline
 
-Pokud má kanál alespoň pět vzorků a směrodatná odchylka je nejvýše `0.001`, vznikne příznak `Flatline`.
+Pokud má kanál alespoň pět platných vzorků, absolutní hodnota průměru je větší než 0,1 a směrodatná odchylka je nejvýše `0.001`, vznikne příznak `Flatline`. Práh leží pod rozlišením senzorů (SHT40 asi 0,0027 °C a 0,002 % RV na krok, BMP280 pod 0,01 hPa), takže prakticky znamená, že všechna čtení jsou totožná, tedy „zamrzlý“ výstup. Podmínka na průměr vylučuje čistý vzduch, kdy SPS30 oprávněně hlásí konstantní 0 µg/m³. Kontroluje se teplota, vlhkost, tlak, PM2,5 a PM10.
 
 ### 16.4 Skok proti minulému intervalu
 
@@ -827,7 +981,7 @@ Pokud má kanál alespoň pět vzorků a směrodatná odchylka je nejvýše `0.0
 | PM4 | 180 |
 | PM10 | 200 |
 
-Překročení vytváří `SuddenJump`.
+Překročení (absolutní rozdíl průměrů je větší nebo roven prahu) vytváří `SuddenJump`. Porovnává se jen s bezprostředně předchozím intervalem. Tlak se na skok nekontroluje.
 
 ### 16.5 Opakovaná konstanta
 
@@ -841,7 +995,7 @@ Kontrola očekává:
 PM1 <= PM2.5 <= PM4 <= PM10
 ```
 
-Při porušení vznikne `ParticleMassOrder`.
+Při porušení vznikne `ParticleMassOrder`. SPS30 počítá hmotnostní koncentrace kumulativně, takže v platných datech pořadí vždy platí. Kontrola tak odhaluje hlavně poškozená nebo chybně přenesená data.
 
 ### 16.7 Kontext baterie
 
@@ -853,29 +1007,27 @@ Měření označené zdrojem `BAT` dostane informační příznak `BatteryContex
 sequenceDiagram
     participant Sensors as Senzory
     participant ESP as ESP32 firmware
-    participant Queue as RAM fronta
+    participant Queue as RAM/flash fronta
     participant API as Backend API
     participant DB as PostgreSQL
     participant QC as Quality service
     participant UI as SignalR klient
 
-    loop každou periodu vzorku
+    loop každých 10 sekund
         ESP->>Sensors: čtení SHT40, BMP280, SPS30
         Sensors-->>ESP: hodnoty nebo chyba
-        ESP->>ESP: průběžný průměr, min, max, stddev, počty
+        ESP->>Queue: vložení surového vzorku
+        Queue->>API: POST /api/samples
+        API->>DB: idempotentní uložení SensorSample
     end
 
-    ESP->>ESP: uzavření časového intervalu
-    ESP->>Queue: vložení MeasurementRecord
-    Queue->>API: POST /api/measurements
-    API->>API: nalezení nebo registrace stanice
-    API->>DB: kontrola StationId + SequenceNumber
-    API->>DB: vložení Measurement
+    API->>API: uzavření nebo přepočet 10min okna
+    API->>DB: vložení nebo aktualizace Measurement
     API->>QC: vyhodnocení pravidel
     QC-->>API: příznaky kvality
     API->>DB: vložení MeasurementQualityFlags
     API->>UI: measurementReceived
-    API-->>Queue: HTTP 201 nebo 200
+    API-->>Queue: HTTP 200
     Queue->>Queue: odstranění potvrzeného záznamu
 ```
 
@@ -883,11 +1035,13 @@ sequenceDiagram
 
 | Hodnota | Zdroj | Význam |
 |---|---|---|
-| `MeasuredAt` | stanice | Konec měřicího intervalu |
-| `CreatedAt` u měření | API | Čas přijetí záznamu |
-| `OccurredAt` | stanice | Čas vzniku události |
+| `SensorSamples.MeasuredAt` | stanice | Čas vzorku zarovnaný na 10 s (UTC, po NTP synchronizaci) |
+| `SensorSamples.CreatedAt` | API | Čas přijetí vzorku |
+| `Measurements.MeasuredAt` | API | Konec desetiminutového intervalu |
+| `Measurements.CreatedAt` | API | Čas prvního sestavení agregátu |
+| `OccurredAt` | stanice | Čas vzniku události; nevěrohodný čas (před NTP synchronizací) API nahradí časem přijetí |
 | `CreatedAt` u události | API | Čas přijetí události |
-| `LastSeenAt` | API | Čas posledního nově uloženého měření nebo události |
+| `LastSeenAt` | API | Čas posledního nově uloženého vzorku nebo události |
 | `UpdatedAt` | API | Čas změny vzdáleného nastavení |
 
 `LastSeenAt` lze použít pro orientační stav dostupnosti, protože v systému zatím není samostatný heartbeat:
@@ -917,14 +1071,29 @@ Výchozí lokální mapování:
 | PostgreSQL | 5432 | 5432 |
 | API | 8080 | 5080 |
 
-Výchozí hesla v compose souboru jsou pouze vývojová a pro produkční NAS musí být nahrazena bezpečnými hodnotami.
+Výchozí hesla a klíče v compose souboru (`meteo`, `meteo-local-key`, `meteo-admin-key`) jsou pouze vývojová a pro produkční NAS musí být nahrazena bezpečnými hodnotami.
+
+### 19.1a Lokální tajné hodnoty
+
+Connection stringy s heslem se neukládají do verzovaných souborů. API i Monitor načítají volitelný soubor `appsettings.Local.json` (v `.gitignore` i `.dockerignore`), který přepisuje `appsettings.json`. Proměnné prostředí mají u API nejvyšší prioritu. Vzor:
+
+```json
+{
+  "ConnectionStrings": {
+    "MeteoDatabase": "Host=<DB_HOST>;Port=<DB_PORT>;Database=meteostanice;Username=<USER>;Password=<PASSWORD>"
+  },
+  "AdminApi": { "ApiKey": "<ADMIN_KEY>" }
+}
+```
 
 ### 19.2 Synology NAS
 
-Na NAS běží API a PostgreSQL jako samostatné kontejnery nebo jako služby jednoho projektu. API potřebuje proměnnou:
+Na NAS běží API a PostgreSQL jako samostatné kontejnery nebo jako služby jednoho projektu. API potřebuje proměnné:
 
 ```text
 ConnectionStrings__MeteoDatabase=Host=<DB_HOST>;Port=<DB_PORT>;Database=meteostanice;Username=<USER>;Password=<PASSWORD>
+StationApi__ApiKey=<KLIC_STANIC>
+AdminApi__ApiKey=<KLIC_ADMINISTRATORA>
 ```
 
 API poslouchá uvnitř kontejneru na portu 8080. ESP32 používá host port namapovaný v Synology Container Manageru, nikoliv interní port databáze.
@@ -937,7 +1106,14 @@ API při startu automaticky volá `Database.Migrate()`. Aktuální migrace:
 
 1. `InitialCreate` - základní tabulky,
 2. `AddMeasurementRuntimeFields` - diagnostické počty a intervalové statistiky,
-3. `UseGuidPrimaryKeys` - převod hlavních klíčů z `bigint` na `uuid`.
+3. `UseGuidPrimaryKeys` - převod hlavních klíčů z `bigint` na `uuid`,
+4. `UseTimestampMeasurementSequence` - časově odvozená sekvence měření,
+5. `AddSensorSamples` - surové desetisekundové vzorky,
+6. `AddDeviceEventGuid` - idempotentní GUID události,
+7. `AddStationProtocolVersion` - verze komunikačního protokolu stanice,
+8. `HardenStationAndAggregationIndexes` - unikátní hardware, příznaky kvality a index událostí,
+9. `AddStationSps30Correction` - procentní korekce SPS30 uložená u stanice,
+10. `AddSampleNumberConcentrations` - početní koncentrace SPS30 v surových vzorcích.
 
 Migrace GUID používá rozšíření PostgreSQL `pgcrypto` a `gen_random_uuid()`.
 
@@ -946,6 +1122,8 @@ Migrace GUID používá rozšíření PostgreSQL `pgcrypto` a `gen_random_uuid()
 Aktuálně implementováno:
 
 - volitelný API klíč pro upload,
+- samostatný povinný administrátorský klíč pro změnu korekce SPS30,
+- tajné hodnoty (connection stringy) mimo Git v `appsettings.Local.json` nebo v proměnných prostředí,
 - oddělení databáze od zařízení,
 - přístup stanice pouze přes API,
 - lokální setup AP s heslem,
@@ -957,64 +1135,57 @@ Současná omezení:
 - výchozí setup heslo je společné,
 - CORS dashboard policy povoluje libovolný origin při credentials,
 - GET endpointy a Swagger nejsou chráněny,
-- databázový `HardwareId` nemá unikátní index, přestože registrační logika očekává jedinečnost,
-- API klíč je uložen ve flash v čitelné key-value konfiguraci.
+- API klíč a heslo Wi-Fi jsou uloženy ve flash v čitelné key-value konfiguraci.
 
-Pro uzavřenou domácí LAN je tento stav použitelný pro vývoj. Pro vzdálený nebo veřejný provoz je nutný reverse proxy s HTTPS, omezení CORS, správa tajných hodnot a autentizace administrativních endpointů.
+Pro uzavřenou domácí LAN je tento stav použitelný pro vývoj. Pro vzdálený nebo veřejný provoz je nutný reverse proxy s HTTPS a omezení CORS.
+
+Poznámka k historii repozitáře: do listopadu 2026 byl v Gitu uložen connection string s heslem k databázi na NAS. Heslo je proto nutné považovat za vyzrazené a změnit ho; samotné odstranění ze souborů nestačí.
 
 ## 21. Současná známá omezení
 
-### 21.1 Sekvence událostí po restartu
+### 21.1 Neúplný minutový blok
 
-Sekvence měření je stabilní, protože se odvozuje z UTC času intervalu. Samostatný čítač událostí však stále není uložen ve flash a po restartu se vrací na začátek. Databáze má pro události unikátní `(StationId, SequenceNumber)`, takže API může novou událost po restartu vyhodnotit jako starou duplicitu.
+Události jsou perzistentní okamžitě a surové vzorky po blocích šesti položek. Náhlé odpojení napájení ještě před dokončením bloku může ztratit nejvýše aktuálních pět desetisekundových vzorků. Jde o záměrný kompromis mezi odolností a životností interní flash. Pro nulovou ztrátu by bylo nutné zapisovat každý vzorek nebo použít externí FRAM či SD kartu.
 
-Doporučená oprava:
+### 21.2 Měření bez synchronizace času
 
-- identitu události odvodit z jejího UTC času a typu, nebo
-- vytvořit stabilní GUID události ve stanici,
-- případně ukládat čítač událostí perzistentně.
+Stanice bez dostupného NTP serveru (například bez Wi-Fi po startu) neukládá žádné vzorky, dokud se čas nesynchronizuje. Jde o vědomou volbu: data bez platné časové značky nelze zarovnat s ostatními stanicemi. Po první synchronizaci hodiny běží dál i při výpadku sítě.
 
-### 21.2 Fronty pouze v RAM
+### 21.3 Mezery v datech
 
-Výpadek API je překlenut pouze do naplnění fronty nebo restartu. Po restartu neodeslané záznamy zaniknou.
+Mezery vznikají při setup režimu, při přepnutí zdroje napájení (jeden vzorek), při ztrátě neúplného bloku po výpadku napájení (nejvýše 5 vzorků) a po přeplnění flash fronty (výpadek API delší než asi 12 h). Při analýze je potřeba je odlišit od skutečné poruchy senzoru, například podle `DeviceEvents` a počtů vzorků v `Measurements`.
 
-Doporučená oprava je perzistentní kruhová fronta ve flash s omezením počtu zápisů a ochranou proti poškození.
+### 21.4 Kapacita interní flash
 
-### 21.3 Nulové hodnoty při nulovém počtu vzorků
+Plná fronta vzorků zabere asi 415 kB. Volné místo souborového systému `I:` se zatím neověřuje za běhu. Pokud zápis selže, vzorky zůstanou v RAM frontě (60 položek) a po jejím zaplnění se zahazují. Chování je potřeba ověřit dlouhodobým testem bez sítě.
 
-Firmware používá při nulovém počtu hodnot průměr `0`. API proto místo `NULL` může přijmout nulu. U teploty, vlhkosti a PM může nula projít fyzikálním rozsahem, i když ve skutečnosti senzor nic nezměřil.
+### 21.5 Uživatelské rozhraní
 
-Kontrola musí vždy kombinovat hodnotu s `OkCount`. Budoucí verze by měla neposílat hodnotu nebo ji označit jako `null`, pokud je počet platných čtení nulový.
+WPF monitor je implementovaný a čte PostgreSQL. SignalR endpoint je připravený, ale samostatný webový dashboard zatím není dokončený.
 
-### 21.4 Napájení v payloadu
+## 22. Korekce SPS30 a plán kalibrace
 
-Databáze i kontrakt obsahují `BatteryVoltage` a `PowerSource`, ale nanoFramework payload je aktuálně neposílá. Část backendové kontroly bateriového kontextu se proto nemůže plně uplatnit.
+První korekční vrstva je implementována pouze na backendu. U každé stanice je uloženo podepsané `Sps30CorrectionPercent`. Firmware a tabulky `SensorSamples` a `Measurements` uchovávají původní hodnoty. API při sestavení `MeasurementDto` dopočítá samostatná pole `CorrectedPm1`, `CorrectedPm25`, `CorrectedPm4` a `CorrectedPm10`:
 
-### 21.5 Pevný lokální posun času
+```text
+corrected = raw * (1 + Sps30CorrectionPercent / 100)
+```
 
-Displej používá UTC+2 a automaticky nepřechází mezi letním a zimním časem.
+Kladná hodnota výsledek zvyšuje, záporná snižuje. Administrační endpoint (hlavička `X-Admin-Key`) přijímá rozsah -100 až 500 procent. Změna nastavení nepřepisuje raw data, ale **korigované hodnoty se počítají vždy s aktuální korekcí, a to i pro starší záznamy**. Korekce není verzovaná ani časově omezená. Pro reprodukovatelné výsledky práce je proto nutné zaznamenat použitou hodnotu korekce a období, nebo pracovat s raw daty a korekci aplikovat až v analýze.
 
-### 21.6 Historické konfigurační limity uploadu
+Procentní korekce je jen multiplikativní a nezohledňuje relativní vlhkost. Ta je u optických čítačů částic, jako je SPS30, hlavním zdrojem systematické chyby (hygroskopický růst částic). Pro kalibraci proti referenci je proto vhodnější regresní model s vlhkostí jako další proměnnou (viz níže).
 
-Nastavení počtu uploadů na cyklus zůstává ve formuláři a flash, ale nový upload worker používá vlastní pevné dávkování po jednom záznamu.
-
-### 21.7 Uživatelské rozhraní
-
-SignalR je připraven, ale webový a desktopový dashboard zatím nejsou implementovány.
-
-## 22. Plán kalibrace
-
-Kalibrace bude provedena pouze na backendu. Firmware bude nadále posílat surové agregované hodnoty.
-
-Navržený tok:
+Aktuální tok:
 
 ```text
 Raw měření
 -> kontrola kvality
--> výběr platného kalibračního profilu
--> výpočet korigované hodnoty
--> uložení raw i corrected hodnoty
+-> desetiminutový raw agregát
+-> aplikace procentní korekce SPS30 při výstupu API
+-> raw i corrected hodnota v DTO
 ```
+
+Teplota, vlhkost a tlak se procentně nekorigují. Jejich odchylky se zatím používají při porovnání stanic a hodnocení kvality. Regresní kalibrační profily s časovou platností zůstávají plánovaným rozšířením pro případ, že jednoduchá procentní korekce nebude dostačující.
 
 Pro lineární kalibraci:
 
@@ -1042,7 +1213,7 @@ Navržená budoucí tabulka `StationSensorCalibrations`:
 | `IsActive` | Aktivní profil |
 | `CreatedAt` | Čas vytvoření |
 
-Původní data musí zůstat neměnná. Korigované hodnoty mají být uloženy odděleně nebo vypočteny s přesnou vazbou na verzi kalibrace.
+Původní data musí zůstat neměnná. U budoucí regresní kalibrace musí být korigovaná hodnota vypočtena s přesnou vazbou na verzi kalibračního profilu.
 
 Tři vlastní stanice lze nejdříve kolokovat a provést interkalibraci. Bez profesionálního referenčního přístroje jde o vzájemné srovnání, nikoliv absolutní kalibraci. Robustní pracovní referencí může být medián tří současně měřících stanic.
 
@@ -1156,17 +1327,15 @@ Syntetické vady mohou zahrnovat bias, gain error, lineární drift, flatline, �
 
 ## 25. Doporučené pořadí další implementace
 
-1. Doplnit `BatteryVoltage` a `PowerSource` do firmware payloadu.
-2. Posílat chybějící hodnoty jako `NULL`, nikoliv nulu.
-3. Stabilizovat idempotenci událostí po restartu.
-4. Zavést perzistentní frontu neodeslaných dat.
-5. Doplnit endpoint se seznamem stanic a jejich online stavem.
-6. Implementovat funkční webový dashboard.
-7. Přidat kalibrační tabulky a oddělit raw a corrected hodnoty.
-8. Implementovat porovnání tří stanic ve stejném intervalu.
-9. Implementovat denní statistickou diagnostiku.
-10. Sestavit a vyhodnotit AI model diagnostiky poruch.
-11. Zabezpečit produkční komunikaci pomocí HTTPS a administrativní autentizace.
+1. Ověřit firmware 0.4.0 na hardwaru: obnovu Wi-Fi po restartu routeru, start bez sítě (žádné vzorky do NTP), zastavení a náběh SPS30 při přechodu na baterii, obnovu obou flash front po odpojení napájení a 12h provoz bez API (kapacita flash).
+2. Doplnit automatické testy registrace, idempotence, agregace a pravidel kvality.
+3. Připravit analytickou část (Python): export `/api/samples/export.csv`, kontrola časových značek a mezer, robustní detektory (klouzavý medián a MAD, Hampelův filtr, EWMA/CUSUM, Isolation Forest) a jejich vyhodnocení na anotovaných nebo synteticky narušených datech.
+4. Implementovat porovnání tří stanic ve stejném intervalu (medián a MAD, `CrossStationOutlier`).
+5. Kolokační experiment a kalibrace SPS30 s vlivem vlhkosti; podle výsledku nahradit procentní korekci verzovanými kalibračními profily.
+6. Implementovat denní statistickou diagnostiku.
+7. Sestavit a vyhodnotit AI model diagnostiky poruch.
+8. Implementovat funkční webový dashboard.
+9. Zabezpečit případnou komunikaci mimo domácí LAN pomocí HTTPS.
 
 ## 26. Shrnutí současného stavu
 
@@ -1174,16 +1343,18 @@ Aktuálně je funkční hlavní vertikální řetězec:
 
 ```text
 reálné senzory
--> ESP32
--> časově zarovnaná agregace
--> RAM fronta
+-> ESP32 (vzorkování až po NTP synchronizaci, dohled nad Wi-Fi)
+-> časově zarovnané 10s vzorky včetně početních koncentrací SPS30
+-> minutový RAM staging a perzistentní flash fronta surových vzorků
+-> perzistentní flash fronta událostí
 -> HTTP API
 -> automatická registrace stanice
 -> PostgreSQL
+-> backendová 10min agregace
 -> pravidlová kontrola kvality
 -> SignalR oznámení
 ```
 
 Systém umí obsluhovat více fyzických stanic a uchovává nejen výsledné průměry, ale také data potřebná pro posouzení důvěryhodnosti měření. To vytváří vhodný základ pro kalibraci, porovnání stanic, detekci driftu a budoucí AI diagnostiku.
 
-Za hotové nelze zatím považovat uživatelský dashboard, kalibrační vrstvu, dlouhodobou statistickou úlohu, AI klasifikaci poruch, trvalou offline frontu ani plné produkční zabezpečení. Tyto části tvoří jasně definovaný plán dalšího rozvoje a experimentální část diplomové práce.
+Za hotové nelze zatím považovat webový dashboard, analytickou část s detekcí anomálií a jejím vyhodnocením, pokročilé regresní kalibrační profily, dlouhodobou statistickou úlohu, AI klasifikaci poruch ani zabezpečení pro provoz mimo domácí LAN. Implementovány jsou základní procentní korekce SPS30, WPF monitor, perzistence událostí a debounced události poruch a zotavení senzorů. Změny firmwaru 0.4.0 zatím nebyly ověřeny na hardwaru (kap. 25, bod 1).

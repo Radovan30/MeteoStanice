@@ -19,6 +19,11 @@ public sealed class MeteoDbContext(DbContextOptions<MeteoDbContext> options) : D
     public DbSet<Measurement> Measurements => Set<Measurement>();
 
     /// <summary>
+    /// Raw sensor samples used for analysis and backend aggregation.
+    /// </summary>
+    public DbSet<SensorSample> SensorSamples => Set<SensorSample>();
+
+    /// <summary>
     /// Device events.
     /// </summary>
     public DbSet<DeviceEvent> DeviceEvents => Set<DeviceEvent>();
@@ -50,6 +55,9 @@ public sealed class MeteoDbContext(DbContextOptions<MeteoDbContext> options) : D
         {
             entity.HasIndex(station => station.StationGuid).IsUnique();
             entity.HasIndex(station => station.StationCode).IsUnique();
+            entity.HasIndex(station => station.HardwareId)
+                .IsUnique()
+                .HasFilter("\"HardwareId\" <> ''");
             entity.Property(station => station.StationCode).HasMaxLength(64);
             entity.Property(station => station.Name).HasMaxLength(160);
             entity.Property(station => station.LocationText).HasMaxLength(200);
@@ -65,9 +73,23 @@ public sealed class MeteoDbContext(DbContextOptions<MeteoDbContext> options) : D
             entity.Property(measurement => measurement.Status).HasMaxLength(64);
         });
 
+        modelBuilder.Entity<SensorSample>(entity =>
+        {
+            entity.HasIndex(sample => new { sample.StationId, sample.SequenceNumber }).IsUnique();
+            entity.HasIndex(sample => new { sample.StationId, sample.MeasuredAt });
+            entity.HasIndex(sample => sample.MeasuredAt);
+            entity.Property(sample => sample.PowerSource).HasMaxLength(16);
+            entity.Property(sample => sample.Sht40Status).HasMaxLength(32);
+            entity.Property(sample => sample.Bmp280Status).HasMaxLength(32);
+            entity.Property(sample => sample.Sps30Status).HasMaxLength(32);
+            entity.Property(sample => sample.Status).HasMaxLength(64);
+        });
+
         modelBuilder.Entity<DeviceEvent>(entity =>
         {
-            entity.HasIndex(deviceEvent => new { deviceEvent.StationId, deviceEvent.SequenceNumber }).IsUnique();
+            entity.HasIndex(deviceEvent => new { deviceEvent.StationId, deviceEvent.EventGuid }).IsUnique();
+            entity.HasIndex(deviceEvent => new { deviceEvent.StationId, deviceEvent.SequenceNumber });
+            entity.HasIndex(deviceEvent => new { deviceEvent.StationId, deviceEvent.OccurredAt });
             entity.Property(deviceEvent => deviceEvent.Severity).HasMaxLength(32);
             entity.Property(deviceEvent => deviceEvent.Category).HasMaxLength(64);
             entity.Property(deviceEvent => deviceEvent.Code).HasMaxLength(80);
@@ -100,7 +122,7 @@ public sealed class MeteoDbContext(DbContextOptions<MeteoDbContext> options) : D
 
         modelBuilder.Entity<MeasurementQualityFlag>(entity =>
         {
-            entity.HasIndex(flag => new { flag.MeasurementId, flag.SensorChannelId, flag.QualityCheckId });
+            entity.HasIndex(flag => new { flag.MeasurementId, flag.SensorChannelId, flag.QualityCheckId }).IsUnique();
             entity.Property(flag => flag.Severity).HasMaxLength(32);
             entity.Property(flag => flag.Message).HasMaxLength(500);
         });

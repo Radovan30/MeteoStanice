@@ -5,7 +5,8 @@ using System.Threading;
 namespace MeteoStanice
 {
     /// <summary>
-    /// Uploads queued records outside the main meteo loop.
+    /// Uploads queued records and keeps Wi-Fi connected outside the main meteo loop,
+    /// so slow network operations never delay the ten-second sampling.
     /// </summary>
     public sealed class NanoUploadWorker
     {
@@ -14,23 +15,29 @@ namespace MeteoStanice
         private const int IdleDelayMilliseconds = 1000;
         private const int PauseDelayMilliseconds = 100;
         private const int SchedulePollMilliseconds = 200;
+        private const int RawSamplesPerBatch = 6;
 
-        private readonly NanoMeasurementQueue _measurementQueue;
         private readonly NanoDeviceEventQueue _eventQueue;
-        private readonly NanoMeasurementUploadService _measurementUploadService;
+        private readonly NanoRawSampleQueue _rawSampleQueue;
+        private readonly NanoRawSamplePersistentQueue _persistentRawSampleQueue;
         private readonly NanoDeviceEventUploadService _eventUploadService;
+        private readonly NanoRawSampleUploadService _rawSampleUploadService;
         private readonly NanoUploadClient _uploadClient;
+        private readonly NanoWifiSupervisor _wifiSupervisor;
         private bool _started;
         private bool _paused;
+        private bool _busy;
         private long _nextUploadAttemptTicks;
 
-        public NanoUploadWorker(NanoMeasurementQueue measurementQueue, NanoDeviceEventQueue eventQueue, NanoMeasurementUploadService measurementUploadService, NanoDeviceEventUploadService eventUploadService, NanoUploadClient uploadClient)
+        public NanoUploadWorker(NanoDeviceEventQueue eventQueue, NanoRawSampleQueue rawSampleQueue, NanoRawSamplePersistentQueue persistentRawSampleQueue, NanoDeviceEventUploadService eventUploadService, NanoRawSampleUploadService rawSampleUploadService, NanoUploadClient uploadClient, NanoWifiSupervisor wifiSupervisor)
         {
-            _measurementQueue = measurementQueue;
             _eventQueue = eventQueue;
-            _measurementUploadService = measurementUploadService;
+            _rawSampleQueue = rawSampleQueue;
+            _persistentRawSampleQueue = persistentRawSampleQueue;
             _eventUploadService = eventUploadService;
+            _rawSampleUploadService = rawSampleUploadService;
             _uploadClient = uploadClient;
+            _wifiSupervisor = wifiSupervisor;
         }
 
         public void Start()
@@ -46,10 +53,21 @@ namespace MeteoStanice
             Debug.WriteLine("Upload worker spusten mimo hlavni meteo smycku.");
         }
 
-        public void Pause()
+        /// <summary>
+        /// Pauses the worker and waits until a running upload or Wi-Fi reconnect finishes,
+        /// so setup mode can safely take over the Wi-Fi adapter.
+        /// </summary>
+        public void Pause(int waitMilliseconds)
         {
             _paused = true;
-            Debug.WriteLine("Upload worker pozastaven.");
+            int waited = 0;
+            while (_busy && waited < waitMilliseconds)
+            {
+                Thread.Sleep(50);
+                waited += 50;
+            }
+
+            Debug.WriteLine("Upload worker pozastaven" + (_busy ? " (operace stale bezi)." : "."));
         }
 
         public void Resume()
@@ -63,41 +81,60 @@ namespace MeteoStanice
         {
             while (true)
             {
+                // Set busy before reading the pause flag; Pause() then always waits for this iteration.
+                _busy = true;
                 try
                 {
                     if (_paused)
                     {
+                        _busy = false;
                         Thread.Sleep(PauseDelayMilliseconds);
                         continue;
                     }
 
-                    if (_measurementQueue.Count == 0 && _eventQueue.Count == 0)
+                    if (_wifiSupervisor != null && _wifiSupervisor.ReconnectIfNeeded(_uploadClient.ConsecutiveNetworkFailures))
                     {
+                        _uploadClient.ResetNetworkFailures();
+                        _nextUploadAttemptTicks = 0;
+                    }
+
+                    if (_wifiSupervisor != null && !_wifiSupervisor.IsConnected)
+                    {
+                        _busy = false;
+                        Thread.Sleep(IdleDelayMilliseconds);
+                        continue;
+                    }
+
+                    if (_eventQueue.Count == 0 && _rawSampleQueue.Count == 0 && _persistentRawSampleQueue.Count == 0)
+                    {
+                        _busy = false;
                         Thread.Sleep(IdleDelayMilliseconds);
                         continue;
                     }
 
                     if (!CanAttemptUpload())
                     {
+                        _busy = false;
                         Thread.Sleep(SchedulePollMilliseconds);
                         continue;
                     }
 
-                    int uploadedMeasurements = _measurementUploadService.TryUploadPending(1);
-                    int uploadedEvents = 0;
-                    if (uploadedMeasurements == 0)
+                    int uploadedEvents = _eventUploadService.TryUploadPending(1);
+                    int uploadedRawSamples = 0;
+
+                    if (uploadedEvents == 0)
                     {
-                        uploadedEvents = _eventUploadService.TryUploadPending(1);
+                        uploadedRawSamples = _rawSampleUploadService.TryUploadPending(RawSamplesPerBatch);
                     }
 
-                    if (uploadedMeasurements > 0 || uploadedEvents > 0)
+                    if (uploadedEvents > 0 || uploadedRawSamples > 0)
                     {
-                        Debug.WriteLine("Upload worker uploaded measurements=" + uploadedMeasurements + ", events=" + uploadedEvents);
+                        Debug.WriteLine("Upload worker uploaded events=" + uploadedEvents + ", raw samples=" + uploadedRawSamples);
                         ScheduleNextUploadAttempt(true);
                     }
                     else
                     {
-                        ScheduleNextUploadAttempt(_uploadClient.LastUploadSucceeded);
+                        ScheduleNextUploadAttempt(_uploadClient.LastUploadSucceeded || _uploadClient.LastUploadRejected);
                     }
                 }
                 catch (Exception exception)
@@ -105,6 +142,8 @@ namespace MeteoStanice
                     Debug.WriteLine("Upload worker chyba: " + exception.Message);
                     ScheduleNextUploadAttempt(false);
                 }
+
+                _busy = false;
             }
         }
 

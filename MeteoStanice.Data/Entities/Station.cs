@@ -41,6 +41,17 @@ public sealed class Station
     public string FirmwareVersion { get; set; } = string.Empty;
 
     /// <summary>
+    /// Last JSON protocol version reported by station firmware.
+    /// </summary>
+    public int ProtocolVersion { get; set; }
+
+    /// <summary>
+    /// Signed percentage correction applied when SPS30 mass concentrations are presented.
+    /// Raw samples and raw aggregates remain unchanged.
+    /// </summary>
+    public double Sps30CorrectionPercent { get; set; }
+
+    /// <summary>
     /// UTC timestamp when the station was created in the backend.
     /// </summary>
     public DateTimeOffset CreatedAt { get; set; }
@@ -59,4 +70,9 @@ public sealed class Station
     /// Measurements produced by the station.
     /// </summary>
     public ICollection<Measurement> Measurements { get; set; } = new List<Measurement>();
+
+    /// <summary>
+    /// Raw sensor samples produced by the station.
+    /// </summary>
+    public ICollection<SensorSample> SensorSamples { get; set; } = new List<SensorSample>();
 }
