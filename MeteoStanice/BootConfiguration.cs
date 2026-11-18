@@ -1,5 +1,6 @@
 using System;
 using System.Diagnostics;
+using System.Net.NetworkInformation;
 
 namespace MeteoStanice
 {
@@ -269,16 +270,89 @@ namespace MeteoStanice
         }
 
         /// <summary>
-        /// Creates a station GUID suitable for permanent flash storage.
+        /// Gives the configuration a completely new identity (new GUID and hardware ID derived from the
+        /// Wi-Fi MAC, placeholder station code). The backend then registers it as a new station with a new code.
+        /// Used from the setup form when two boards ended up with the same identity.
+        /// </summary>
+        public static void AssignNewIdentity(StationConfiguration configuration)
+        {
+            configuration.StationGuid = CreateStationGuid();
+            configuration.DeviceHardwareId = CreateHardwareId();
+            configuration.StationId = "METEO-TEST-001";
+            configuration.StationName = "TTGO T-Display meteostanice";
+            Debug.WriteLine("Nova identita stanice: GUID=" + configuration.StationGuid + ", HW=" + configuration.DeviceHardwareId);
+        }
+
+        /// <summary>
+        /// Creates a station GUID suitable for permanent flash storage. The last six bytes are the
+        /// Wi-Fi MAC address, so two boards can never get the same GUID even if the random generator
+        /// produces the same sequence after the first boot.
         /// </summary>
         private static string CreateStationGuid()
         {
-            return Guid.NewGuid().ToString();
+            byte[] bytes = Guid.NewGuid().ToByteArray();
+            byte[] mac = ReadWifiMac();
+            if (mac != null)
+            {
+                for (int index = 0; index < 6; index++)
+                {
+                    bytes[10 + index] = mac[index];
+                }
+            }
+
+            return new Guid(bytes).ToString();
         }
 
+        /// <summary>
+        /// Hardware ID from the factory-unique Wi-Fi MAC address of the ESP32 (fallback: random GUID).
+        /// </summary>
         private static string CreateHardwareId()
         {
-            return BoardProfile.HardwareIdPrefix + "-" + Guid.NewGuid().ToString();
+            byte[] mac = ReadWifiMac();
+            return mac != null
+                ? BoardProfile.HardwareIdPrefix + "-" + ToHex(mac)
+                : BoardProfile.HardwareIdPrefix + "-" + Guid.NewGuid().ToString();
+        }
+
+        private static byte[] ReadWifiMac()
+        {
+            try
+            {
+                NetworkInterface[] interfaces = NetworkInterface.GetAllNetworkInterfaces();
+                if (interfaces == null)
+                {
+                    return null;
+                }
+
+                for (int index = 0; index < interfaces.Length; index++)
+                {
+                    if (interfaces[index].NetworkInterfaceType == NetworkInterfaceType.Wireless80211)
+                    {
+                        byte[] mac = interfaces[index].PhysicalAddress;
+                        if (mac != null && mac.Length == 6)
+                        {
+                            return mac;
+                        }
+                    }
+                }
+            }
+            catch (Exception exception)
+            {
+                Debug.WriteLine("Wi-Fi MAC nelze precist: " + exception.Message);
+            }
+
+            return null;
+        }
+
+        private static string ToHex(byte[] bytes)
+        {
+            string text = string.Empty;
+            for (int index = 0; index < bytes.Length; index++)
+            {
+                text += bytes[index].ToString("X2");
+            }
+
+            return text;
         }
 
         private static bool IsUnknownHardwareId(string hardwareId)

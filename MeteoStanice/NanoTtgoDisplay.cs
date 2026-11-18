@@ -42,6 +42,14 @@ namespace MeteoStanice
         /// </summary>
         public void SetStationIdentity(string stationCode, string stationName)
         {
+            // A station without a backend-assigned code still has the placeholder METEO-TEST-001,
+            // which would otherwise be shown as METEO1, the same as the registered station meteostanice-001.
+            if (IsPlaceholderCode(stationCode))
+            {
+                _stationTitle = "NOVA";
+                return;
+            }
+
             string stationNumber = TrailingNumber(stationCode);
             if (stationNumber.Length == 0)
             {
@@ -770,6 +778,19 @@ namespace MeteoStanice
             }
 
             return "ERR";
+        }
+
+        private static bool IsPlaceholderCode(string stationCode)
+        {
+            if (stationCode == null || stationCode.Length == 0)
+            {
+                return true;
+            }
+
+            string upper = stationCode.ToUpper();
+            return upper == "METEO-UNKNOWN"
+                || (upper.Length >= 11 && upper.Substring(0, 11) == "METEO-TEST-")
+                || (stationCode.Length == 36 && stationCode.IndexOf("-") == 8);
         }
 
         private static string TrailingNumber(string value)

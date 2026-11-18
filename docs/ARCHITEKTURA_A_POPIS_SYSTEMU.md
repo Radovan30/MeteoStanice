@@ -240,8 +240,8 @@ Firmware používá několik identifikátorů s odlišným významem:
 
 | Hodnota | Význam |
 |---|---|
-| `StationGuid` | Trvalý GUID fyzické stanice, vytvořený při prvním spuštění a uložený ve flash |
-| `DeviceHardwareId` | Identifikátor fyzické desky ve tvaru prefixu TTGO a GUID |
+| `StationGuid` | Trvalý GUID fyzické stanice, vytvořený při prvním spuštění a uložený ve flash; od firmwaru 0.4.0 obsahuje v posledních 6 bajtech MAC adresu Wi-Fi, takže je unikátní pro každý čip |
+| `DeviceHardwareId` | Identifikátor fyzické desky; od firmwaru 0.4.0 ve tvaru `TTGO-TDISPLAY-ESP32-<MAC>`, starší konfigurace mají prefix a náhodný GUID |
 | `StationId` | Čitelný provozní kód, který může backend změnit například na `meteostanice-001` |
 | `Station.Name` | Uživatelsky zobrazovaný název stanice |
 | `Station.Id` | Primární databázový GUID záznamu stanice |
@@ -256,7 +256,9 @@ meteostanice-003
 
 Firmware přečte `stationCode` z úspěšné odpovědi API, zapíše jej do `StationId` a uloží jej do flash. Tím se přidělený název zachová po restartu.
 
-V normálním provozním režimu displej používá číselnou část kódu stanice jako krátký nadpis. Například `meteostanice-001`, `METEO-TEST-001` nebo název končící číslem 1 se zobrazí jako `METEO1`. Po přidělení nového kódu backendem se nadpis aktualizuje za běhu bez restartu. V konfiguračním režimu se místo něj stále zobrazuje `SETUP`.
+V normálním provozním režimu displej používá číselnou část kódu stanice jako krátký nadpis. Například `meteostanice-001` nebo název končící číslem 1 se zobrazí jako `METEO1`. Stanice, která od backendu ještě nedostala kód (výchozí `METEO-TEST-001`), zobrazuje `NOVA`, aby se nepletla s registrovanou stanicí 1. Pokud `NOVA` zůstává i po startu, upload neprochází (adresa API, klíč, síť).
+
+Starší firmware vytvářel identitu jen pomocí `Guid.NewGuid()` při prvním startu. Generátor náhodných čísel ESP32 po startu nemusí být dostatečně náhodný, takže dvě desky mohly dostat stejný GUID i hardwarové ID. Backend je pak považuje za jednu stanici, obě dostanou stejný kód a jejich vzorky se míchají (vzorky se stejným časem se zahodí jako duplicity). Nové identity proto vycházejí z MAC adresy. Pro opravu již duplicitní desky slouží v setup formuláři volba **Nová identita stanice**: vytvoří nový GUID a hardwarové ID z MAC a vrátí kód na výchozí, takže backend desku zaregistruje jako novou stanici s novým kódem. Data uložená do té doby zůstanou u původní stanice. Setup stránka zobrazuje kód, hardwarové ID a GUID, takže lze desky porovnat. Duplicitní identitu prozradí i střídání dvou hodnot `BootId` u jedné stanice v `SampleUploadBatches`. Po přidělení nového kódu backendem se nadpis aktualizuje za běhu bez restartu. V konfiguračním režimu se místo něj stále zobrazuje `SETUP`.
 
 Backend při identifikaci stanice postupuje přibližně takto:
 
@@ -346,7 +348,10 @@ Formulář obsahuje:
 - bránu,
 - masku,
 - DNS,
-- textové místo meteostanice.
+- textové místo meteostanice,
+- volbu „Nová identita stanice“ (viz kap. 6).
+
+Stránka navíc ukazuje aktuální kód stanice, hardwarové ID a GUID.
 
 Po odeslání formuláře se konfigurace uloží do flash a ihned se znovu načte a ověří. Web vrátí stránku `ULOZENO` nebo `CHYBA`. Setup zůstává aktivní, dokud uživatel znovu nestiskne tlačítko.
 
